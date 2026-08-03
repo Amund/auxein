@@ -1,0 +1,27 @@
+{
+  "name": "smoke",
+  "model": {
+    "dimension": 2,
+    "scalar": "f64",
+    "memory": 50,
+    "budget": 20
+  },
+  "seed": 2701,
+  "phases": [
+    {
+      "name": "alternating",
+      "steps": 200,
+      "world": {
+        "name": "alternating",
+        "axis": 0,
+        "offset": 2.0,
+        "noise": 0.12
+      }
+    }
+  ],
+  "observe": {"every": 50},
+  "probes": [
+    {"name": "left", "x": [-2.0, 0.0]},
+    {"name": "right", "x": [2.0, 0.0]}
+  ]
+}
