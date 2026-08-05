@@ -116,6 +116,21 @@ class QuadraticKernelTests(unittest.TestCase):
         with self.assertRaises(InvariantViolation):
             QuadraticKernel(1, 1.0, [1.0], 0.99)
 
+    def test_repeated_decay_crosses_subnormal_range(self) -> None:
+        kernel = QuadraticKernel.point([0.37, -0.91], 1.0)
+        law = MemoryLaw(10.0)
+        for _ in range(12_000):
+            kernel.decay(law.chi, alpha=law.alpha)
+            if kernel.W == 0.0:
+                break
+
+    def test_validation_tolerates_one_subnormal_quantum(self) -> None:
+        left = 5.08550459395e-313
+        right = 5.085504594e-313
+        component = math.sqrt(right)
+        self.assertEqual(component * component, right)
+        QuadraticKernel(2, 1.0, [component, 0.0], left).validate()
+
 
 class NumericalDegeneracyTests(unittest.TestCase):
     def test_exact_repeated_point_keeps_zero_radius_in_both_formats(self) -> None:

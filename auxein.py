@@ -136,6 +136,12 @@ class NumericPolicy:
     def epsilon(self) -> float:
         return 2.0 ** (-23 if self.scalar_format == "f32" else -52)
 
+    @property
+    def minimum_subnormal(self) -> float:
+        if self.scalar_format == "f32":
+            return struct.unpack("!f", struct.pack("!I", 1))[0]
+        return math.ulp(0.0)
+
     def cast(self, value: float) -> float:
         value = float(value)
         if not math.isfinite(value):
@@ -365,14 +371,42 @@ def _gamma_bound(epsilon: float, operations: int) -> float:
     return product / (1.0 - product)
 
 
-def _roundoff_bound(*values: float, dimension: int = 1) -> float:
-    """Binary64 evaluation bound, never a behavioural threshold."""
+def _underflow_bound(minimum_subnormal: float, operations: int) -> float:
+    """Conservative absolute error floor for subnormal arithmetic.
 
+    The usual relative ``gamma_n`` model becomes uninformative when its bound
+    underflows to zero. One representable subnormal quantum per counted
+    operation is a conservative upper bound, derived from IEEE-754 resolution
+    rather than an arbitrary behavioural epsilon.
+    """
+
+    return max(1, int(operations)) * float(minimum_subnormal)
+
+
+def _combined_roundoff_bound(
+    epsilon: float,
+    minimum_subnormal: float,
+    *values: float,
+    dimension: int = 1,
+) -> float:
     scale = math.fsum(abs(float(value)) for value in values)
     if scale == 0.0:
         return 0.0
     operations = 2 * max(1, dimension) + 8
-    return _gamma_bound(math.ulp(1.0), operations) * scale
+    relative = _gamma_bound(epsilon, operations) * scale
+    absolute = _underflow_bound(minimum_subnormal, operations)
+    return math.fsum((relative, absolute))
+
+
+def _roundoff_bound(*values: float, dimension: int = 1) -> float:
+    """Binary64 evaluation bound, never a behavioural threshold."""
+
+    return _combined_roundoff_bound(
+        math.ulp(1.0),
+        math.ulp(0.0),
+        *values,
+        dimension=dimension,
+    )
 
 
 def _persistent_roundoff_bound(
@@ -382,11 +416,13 @@ def _persistent_roundoff_bound(
 ) -> float:
     """Resolution bound induced by the chosen persistent real format."""
 
-    scale = math.fsum(abs(float(value)) for value in values)
-    if scale == 0.0:
-        return 0.0
-    operations = 2 * max(1, dimension) + 8
-    return _gamma_bound(NumericPolicy(scalar_format).epsilon, operations) * scale
+    policy = NumericPolicy(scalar_format)
+    return _combined_roundoff_bound(
+        policy.epsilon,
+        policy.minimum_subnormal,
+        *values,
+        dimension=dimension,
+    )
 
 
 def _nonnegative(value: float, *, scale_values: Iterable[float], dimension: int) -> float:
