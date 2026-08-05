@@ -27,6 +27,7 @@ from decimal import (
     InvalidOperation as DecimalInvalidOperation,
     ROUND_FLOOR,
 )
+import copy
 import math
 import struct
 from typing import Any, Iterable, Iterator, Literal, Mapping, Protocol, Sequence
@@ -2093,6 +2094,7 @@ class Auxein:
         "_check_invariants",
         "_step_index",
         "_layer_serial",
+        "_state_extensions",
     )
 
     def __init__(self, *args: object, **kwargs: object) -> None:
@@ -2138,6 +2140,7 @@ class Auxein:
         step_index: int = 0,
         layer_serial: int | None = None,
         check_invariants: bool = True,
+        state_extensions: Mapping[str, object] | None = None,
     ) -> "Auxein":
         self = cls.__new__(cls)
         self._dimension = _strict_positive_int(dimension, "dimension")
@@ -2166,6 +2169,12 @@ class Auxein:
             if layer_serial is not None
             else max((layer._owner_serial for layer in layers), default=0) + 1
         )
+        if state_extensions is None:
+            self._state_extensions = {}
+        elif not isinstance(state_extensions, Mapping):
+            raise TypeError("state_extensions must be an object")
+        else:
+            self._state_extensions = copy.deepcopy(dict(state_extensions))
         self._quantize_state()
         self.validate()
         return self
@@ -3087,7 +3096,8 @@ class Auxein:
                 })
             return {"plus": kernel_dict(bud.plus), "minus": kernel_dict(bud.minus), "owners": owners}
 
-        return {
+        result = copy.deepcopy(self._state_extensions)
+        result.update({
             "schema_version": STATE_SCHEMA_VERSION,
             "model_version": MODEL_VERSION,
             "dimension": self._dimension,
@@ -3108,7 +3118,8 @@ class Auxein:
                 }
                 for layer in self._layers
             ],
-        }
+        })
+        return result
 
     @classmethod
     def from_state_dict(
@@ -3149,23 +3160,27 @@ class Auxein:
                 raise ValueError(f"{label} must be finite")
             return result
 
-        exact_keys(
-            state,
-            {
-                "schema_version",
-                "model_version",
-                "dimension",
-                "scalar",
-                "memory",
-                "eta",
-                "step_index",
-                "next_identity",
-                "next_layer_serial",
-                "root_bud",
-                "layers",
-            },
-            "state",
-        )
+        canonical_root_keys = {
+            "schema_version",
+            "model_version",
+            "dimension",
+            "scalar",
+            "memory",
+            "eta",
+            "step_index",
+            "next_identity",
+            "next_layer_serial",
+            "root_bud",
+            "layers",
+        }
+        missing_root_keys = canonical_root_keys - set(state)
+        if missing_root_keys:
+            raise ValueError(f"state keys mismatch: missing={sorted(missing_root_keys)}")
+        state_extensions = {
+            key: copy.deepcopy(value)
+            for key, value in state.items()
+            if key not in canonical_root_keys
+        }
         if state["schema_version"] != STATE_SCHEMA_VERSION:
             raise ValueError("unsupported state schema version")
         if state["model_version"] != MODEL_VERSION:
@@ -3336,6 +3351,7 @@ class Auxein:
                 state["next_layer_serial"], "next_layer_serial", minimum=1
             ),
             check_invariants=check_invariants,
+            state_extensions=state_extensions,
         )
         return result
 

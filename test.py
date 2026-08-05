@@ -902,8 +902,13 @@ class NetworkTests(unittest.TestCase):
             self.assertEqual(first.to_state_dict(), restored.to_state_dict())
             self.assertEqual(report_a.transformations, report_b.transformations)
 
+        extended = copy.deepcopy(state)
+        extended["surprise"] = {"opaque": [1, True, "x"]}
+        extended_restored = Auxein.from_state_dict(extended, budget_units=budget)
+        self.assertEqual(extended_restored.to_state_dict()["surprise"], extended["surprise"])
+
         malformed = copy.deepcopy(state)
-        malformed["surprise"] = 1
+        malformed["root_bud"]["surprise"] = 1
         with self.assertRaises(ValueError):
             Auxein.from_state_dict(malformed, budget_units=budget)
 
