@@ -1,0 +1,8 @@
+{
+  "name": "sequential_not_simultaneous",
+  "description": "The same two values presented on separate steps remain two observations and do not form a vertical context.",
+  "model": {"dimension": 1, "memory": 10, "eta": 1, "scalar": "f64", "budget": 200},
+  "phases": [
+    {"name": "learn-and-replay", "steps": 40, "world": {"name": "point-cycle", "points": [[1.0],[3.0]]}}
+  ]
+}

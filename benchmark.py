@@ -1,366 +1,92 @@
-"""Benchmark and persistence laboratory for the isolated Auxein engine.
-
-The engine owns strict JSON-compatible serialization but performs no I/O.
-This module owns streams, equivalent-cell budgets, atomic save/load, timing,
-and windowed reporting. Only the Python standard library is used.
-"""
+"""Stdlib-only benchmark harness for the true Auxein v0.2.0 canon."""
 
 from __future__ import annotations
 
 import argparse
-from collections import Counter
-from decimal import Decimal, InvalidOperation
 import json
 import math
-import os
-from pathlib import Path
 import random
+import statistics
 import time
-from typing import Iterator, Mapping
 
-from auxein import Auxein, ScalarFootprintMaintenance
-
-
-def gaussian_stream(rng: random.Random, dimension: int) -> Iterator[list[float]]:
-    while True:
-        yield [rng.gauss(0.0, 1.0) for _ in range(dimension)]
+from auxein import Auxein, Kernel, Layer
 
 
-def alternating_stream(rng: random.Random, dimension: int) -> Iterator[list[float]]:
-    sign = 1.0
-    while True:
-        sample = [0.15 * rng.gauss(0.0, 1.0) for _ in range(dimension)]
-        sample[0] += sign * 2.0
-        yield sample
-        sign *= -1.0
+def make_network(scenario: str, dimension: int, cells: int) -> tuple[Auxein, list[list[float]]]:
+    network = Auxein(dimension=dimension, memory=50.0, eta=0.0, budget=max(1000, cells * 2))
+    if scenario == "singleton":
+        center = [0.0] * dimension
+        center[0] = 2.0
+        network.layers[0].cells = [Kernel(1.0, tuple(center), 0.25)]
+        return network, [center]
+    if scenario == "pair-context":
+        a = [0.0] * dimension
+        b = [0.0] * dimension
+        a[0] = 1.0
+        b[0] = 3.0
+        network.layers[0].cells = [Kernel(1.0, tuple(a), 0.0), Kernel(1.0, tuple(b), 0.0)]
+        network.layers.append(Layer([], [Kernel(1.0, tuple((2.0,) + (0.0,) * (dimension - 1)), 1.0)]))
+        return network, [a, b]
+    if scenario == "sparse":
+        rng = random.Random(7)
+        population: list[Kernel] = []
+        for i in range(cells):
+            c = [0.0] * dimension
+            c[0] = 10.0 + i * 0.01
+            for d in range(1, dimension):
+                c[d] = 0.01 * rng.random()
+            population.append(Kernel(1.0, tuple(c), 0.01))
+        target = [0.0] * dimension
+        target[0] = 10.0 + (cells // 2) * 0.01
+        network.layers[0].cells = population
+        return network, [target]
+    if scenario == "dense":
+        population = []
+        for i in range(cells):
+            angle = 2.0 * math.pi * i / max(1, cells)
+            c = [0.0] * dimension
+            c[0] = 1.0 + 0.01 * math.cos(angle)
+            if dimension > 1:
+                c[1] = 0.01 * math.sin(angle)
+            population.append(Kernel(1.0, tuple(c), 10.0))
+        network.layers[0].cells = population
+        x = [0.0] * dimension
+        x[0] = 2.0
+        return network, [x]
+    raise ValueError(f"unknown scenario {scenario}")
 
 
-def drifting_stream(rng: random.Random, dimension: int) -> Iterator[list[float]]:
-    phase = 0
-    while True:
-        center = [0.0 for _ in range(dimension)]
-        center[0] = 2.5 * math.sin(phase / 200.0)
-        if dimension > 1:
-            center[1] = 2.5 * math.cos(phase / 317.0)
-        phase += 1
-        yield [value + 0.25 * rng.gauss(0.0, 1.0) for value in center]
-
-
-def make_stream(
-    name: str,
-    rng: random.Random,
-    dimension: int,
-) -> Iterator[list[float]]:
-    if name == "gaussian":
-        return gaussian_stream(rng, dimension)
-    if name == "alternating":
-        return alternating_stream(rng, dimension)
-    if name == "drifting":
-        return drifting_stream(rng, dimension)
-    raise ValueError(f"unknown stream {name!r}")
-
-
-def parse_nonnegative_decimal(text: str) -> Decimal:
-    try:
-        value = Decimal(text)
-    except InvalidOperation as exc:
-        raise argparse.ArgumentTypeError("budget must be a decimal number") from exc
-    if not value.is_finite() or value < 0:
-        raise argparse.ArgumentTypeError("budget must be finite and nonnegative")
-    return value
-
-
-def read_state(path: str) -> Mapping[str, object]:
-    target = Path(path)
-    with target.open("r", encoding="utf-8") as handle:
-        state = json.load(handle)
-    if not isinstance(state, dict):
-        raise ValueError("saved Auxein state must be a JSON object")
-    return state
-
-
-def write_state_atomic(path: str, state: Mapping[str, object]) -> Path:
-    target = Path(path)
-    if not target.name:
-        raise ValueError("--save must designate a file")
-    temporary = target.with_name(target.name + ".tmp")
-    try:
-        with temporary.open("w", encoding="utf-8") as handle:
-            json.dump(
-                state,
-                handle,
-                ensure_ascii=False,
-                allow_nan=False,
-                separators=(",", ":"),
-            )
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, target)
-    except Exception:
-        try:
-            temporary.unlink()
-        except FileNotFoundError:
-            pass
-        raise
-    return target
-
-
-def resolve_network(args: argparse.Namespace) -> tuple[Auxein, ScalarFootprintMaintenance]:
-    maintenance_model = ScalarFootprintMaintenance()
-    saved_state: Mapping[str, object] | None = read_state(args.load) if args.load else None
-
-    if saved_state is None:
-        dimension = 8 if args.dimension is None else args.dimension
-        scalar_format = "f64" if args.scalar is None else args.scalar
-        memory_half_life = 100.0 if args.memory is None else args.memory
-    else:
-        try:
-            dimension = int(saved_state["dimension"])
-            scalar_format = str(saved_state["scalar"])
-            memory_half_life = float(saved_state["memory"])
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError("saved state lacks valid dimension/format/memory metadata") from exc
-        if args.dimension is not None and args.dimension != dimension:
-            raise ValueError("--dimension conflicts with the loaded state")
-        if args.scalar is not None and args.scalar != scalar_format:
-            raise ValueError("--scalar conflicts with the loaded state")
-        if args.memory is not None and args.memory != memory_half_life:
-            raise ValueError("--memory conflicts with the loaded state")
-
-    if dimension <= 0:
-        raise ValueError("dimension must be positive")
-    if not math.isfinite(memory_half_life) or memory_half_life <= 0.0:
-        raise ValueError("memory must be positive and finite")
-
-    if args.budget_units is not None:
-        budget_arguments: dict[str, object] = {"budget_units": args.budget_units}
-        resolved_units = args.budget_units
-    else:
-        budget = Decimal(1000) if args.budget is None else args.budget
-        budget_arguments = {"budget": budget}
-        resolved_units = maintenance_model.budget_to_units(dimension, scalar_format, budget)
-
-    minimum = maintenance_model.root_substrate_units(dimension, scalar_format)
-    if resolved_units < minimum:
-        raise ValueError(
-            f"budget {resolved_units} is below the permanent root substrate {minimum}"
-        )
-
-    if saved_state is None:
-        network = Auxein.empty(
-            dimension,
-            memory=memory_half_life,
-            eta=1.0 if args.eta is None else args.eta,
-            maintenance_model=maintenance_model,
-            scalar=scalar_format,
-            check_invariants=args.check_invariants,
-            **budget_arguments,
-        )
-    else:
-        network = Auxein.from_state_dict(
-            saved_state,
-            maintenance_model=maintenance_model,
-            check_invariants=args.check_invariants,
-            **budget_arguments,
-        )
-        if args.eta is not None:
-            network.eta = args.eta
-    return network, maintenance_model
-
-
-def run(args: argparse.Namespace) -> dict[str, object]:
-    network, maintenance_model = resolve_network(args)
-    rng = random.Random(args.seed)
-    stream = make_stream(args.stream, rng, network.dimension)
-    initial_step = network.step_index
-
-    for _ in range(args.warmup):
-        network.step(next(stream), detailed_report=False)
-
-    transformations: Counter[str] = Counter()
-    windows: list[dict[str, object]] = []
-    window_transformations: Counter[str] = Counter()
-    window_started = time.perf_counter()
-    start = window_started
-
-    for measured_index in range(args.steps):
-        report = network.step(next(stream), detailed_report=False)
-        kinds = [record.kind for record in report.transformations]
-        transformations.update(kinds)
-        window_transformations.update(kinds)
-
-        window_complete = (
-            args.window is not None
-            and (
-                (measured_index + 1) % args.window == 0
-                or measured_index + 1 == args.steps
-            )
-        )
-        if window_complete:
-            now = time.perf_counter()
-            window_steps = (
-                args.window
-                if (measured_index + 1) % args.window == 0
-                else (measured_index + 1) % args.window
-            )
-            if window_steps == 0:
-                window_steps = args.window
-            elapsed = now - window_started
-            windows.append(
-                {
-                    "from_step": measured_index + 2 - window_steps,
-                    "to_step": measured_index + 1,
-                    "steps": window_steps,
-                    "elapsed_seconds": elapsed,
-                    "steps_per_second": window_steps / elapsed if elapsed > 0.0 else math.inf,
-                    "transformations": dict(window_transformations),
-                    "layers": len(network._layers),
-                    "cells": sum(len(layer.cells) for layer in network._layers),
-                }
-            )
-            window_transformations.clear()
-            window_started = now
-
-    elapsed = time.perf_counter() - start
-    if args.save:
-        write_state_atomic(args.save, network.to_state_dict())
-
-    summary = network.summary()
-    maintenance_equivalent = maintenance_model.budget_from_units(
-        network.dimension,
-        network.scalar,
-        network.maintenance_units(),
-    )
-    return {
-        "stream": args.stream,
-        "dimension": network.dimension,
-        "scalar": network.scalar,
-        "steps": args.steps,
-        "warmup": args.warmup,
-        "initial_network_step": initial_step,
-        "elapsed_seconds": elapsed,
-        "steps_per_second": args.steps / elapsed if elapsed > 0.0 else math.inf,
-        "microseconds_per_step": elapsed * 1_000_000.0 / args.steps,
-        "transformations": dict(transformations),
-        "windows": windows,
-        "budget_equivalent_cells": str(network.budget),
-        "maintenance_equivalent_cells": str(maintenance_equivalent),
-        "network": summary,
-        "loaded_from": args.load,
-        "saved_to": args.save,
-    }
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--steps", type=int, default=1_000)
-    parser.add_argument("--warmup", type=int, default=50)
-    parser.add_argument("--dimension", type=int, default=None)
-    parser.add_argument("--memory", type=float, default=None)
-    parser.add_argument(
-        "--eta",
-        type=float,
-        default=None,
-        help="learning-rate multiplier in [0, 1] (default: 1 or loaded value)",
-    )
-    parser.add_argument("--scalar", choices=("f32", "f64"), default=None)
-    budget_group = parser.add_mutually_exclusive_group()
-    budget_group.add_argument(
-        "--budget",
-        type=parse_nonnegative_decimal,
-        default=None,
-        metavar="CELLS",
-        help="ergonomic budget in equivalent terminal-cell packages (default: 1000)",
-    )
-    budget_group.add_argument(
-        "--budget-units",
-        type=int,
-        default=None,
-        metavar="UNITS",
-        help="advanced exact raw footprint budget",
-    )
-    parser.add_argument(
-        "--stream",
-        choices=("gaussian", "alternating", "drifting"),
-        default="alternating",
-    )
-    parser.add_argument("--seed", type=int, default=7)
-    parser.add_argument("--window", type=int, default=None, metavar="STEPS")
-    parser.add_argument("--load", metavar="FILE")
-    parser.add_argument("--save", metavar="FILE")
-    parser.add_argument(
-        "--check-invariants",
-        action="store_true",
-        help="validate the full hierarchy after every causal phase",
-    )
-    parser.add_argument("--json", action="store_true")
-    return parser
+def run_once(scenario: str, dimension: int, cells: int, steps: int, warmup: int) -> float:
+    network, presentation = make_network(scenario, dimension, cells)
+    for _ in range(warmup):
+        network.step(presentation)
+    start = time.perf_counter()
+    for _ in range(steps):
+        network.step(presentation)
+    return time.perf_counter() - start
 
 
 def main() -> None:
-    parser = build_parser()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--scenario", choices=["singleton", "pair-context", "sparse", "dense"], default="singleton")
+    parser.add_argument("--dimension", type=int, default=8)
+    parser.add_argument("--cells", type=int, default=512)
+    parser.add_argument("--steps", type=int, default=10000)
+    parser.add_argument("--warmup", type=int, default=1000)
+    parser.add_argument("--runs", type=int, default=5)
     args = parser.parse_args()
-    if args.steps <= 0 or args.warmup < 0:
-        parser.error("steps must be positive and warmup nonnegative")
-    if args.dimension is not None and args.dimension <= 0:
-        parser.error("dimension must be positive")
-    if args.window is not None and args.window <= 0:
-        parser.error("window must be positive")
-    if args.eta is not None and (
-        not math.isfinite(args.eta) or not 0.0 <= args.eta <= 1.0
-    ):
-        parser.error("eta must lie in [0, 1]")
-    if args.budget_units is not None and args.budget_units <= 0:
-        parser.error("budget units must be positive")
-
-    try:
-        result = run(args)
-    except (OSError, ValueError, TypeError) as exc:
-        parser.error(str(exc))
-
-    if args.json:
-        print(json.dumps(result, indent=2, sort_keys=True, allow_nan=False))
-        return
-
-    for window in result["windows"]:
-        print(
-            "window "
-            f"{window['from_step']}-{window['to_step']}: "
-            f"{window['elapsed_seconds']:.6f} s, "
-            f"{window['steps_per_second']:.2f} steps/s, "
-            f"cells={window['cells']}, layers={window['layers']}, "
-            f"transformations={window['transformations']}"
-        )
-
-    print("Auxein reference benchmark")
-    print(f"  stream              : {result['stream']}")
-    print(f"  dimension           : {result['dimension']}")
-    print(f"  scalar              : {result['scalar']}")
-    print(f"  memory half-life    : {result['network']['memory']} presentations")
-    print(f"  budget              : {result['budget_equivalent_cells']} equivalent cells")
-    print(f"  warmup steps        : {result['warmup']}")
-    print(f"  measured steps      : {result['steps']}")
-    print(f"  initial network step: {result['initial_network_step']}")
-    print(f"  elapsed             : {result['elapsed_seconds']:.6f} s")
-    print(f"  throughput          : {result['steps_per_second']:.2f} steps/s")
-    print(f"  latency             : {result['microseconds_per_step']:.2f} µs/step")
-    print(f"  transformations     : {result['transformations']}")
-    measured_transforms = sum(result["transformations"].values())
-    print(f"  transforms/step     : {measured_transforms / result['steps']:.4f}")
-    network = result["network"]
-    print(f"  layers              : {network['layers']}")
-    print(f"  cells per layer     : {network['cells_per_layer']}")
-    print(f"  capital per layer   : {network['capital_per_layer']}")
-    print(
-        "  maintenance         : "
-        f"{network['maintenance_units']} / {network['budget_units']} raw units "
-        f"({result['maintenance_equivalent_cells']} active equivalents)"
-    )
-    if result["loaded_from"]:
-        print(f"  loaded              : {result['loaded_from']}")
-    if result["saved_to"]:
-        print(f"  saved               : {result['saved_to']}")
+    elapsed = [run_once(args.scenario, args.dimension, args.cells, args.steps, args.warmup) for _ in range(args.runs)]
+    median = statistics.median(elapsed)
+    print(json.dumps({
+        "scenario": args.scenario,
+        "dimension": args.dimension,
+        "cells": args.cells,
+        "steps": args.steps,
+        "runs": args.runs,
+        "median_seconds": median,
+        "microseconds_per_step": 1e6 * median / args.steps,
+        "steps_per_second": args.steps / median,
+    }, indent=2))
 
 
 if __name__ == "__main__":

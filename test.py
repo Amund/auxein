@@ -1,1337 +1,399 @@
-"""Unit and invariant tests for the isolated Auxein reference engine."""
-
 from __future__ import annotations
 
-import copy
 from decimal import Decimal
-import json
 import math
-import random
 import unittest
-from contextlib import redirect_stderr
-from io import StringIO
-
-import auxein as auxein_module
-from auxein import (
-    Auxein,
-    Bud,
-    Cell,
-    CellIdentity,
-    GrowthProposal,
-    IdentityFactory,
-    InsolventState,
-    InvalidStateOperation,
-    InvariantViolation,
-    Layer,
-    MemoryLaw,
-    NumericPolicy,
-    OwnerMoments,
-    ProposalToken,
-    QuadraticKernel,
-    RootBud,
-    ScalarFootprintMaintenance,
-    route_latent,
-)
-
-
-def budget_for(dimension: int, scalar_format: str, equivalent_cells: int) -> int:
-    return ScalarFootprintMaintenance().budget_to_units(
-        dimension,
-        scalar_format,
-        equivalent_cells,
-    )
-
-
-def kernel_from_mean(mean: float, weight: float = 1.0) -> QuadraticKernel:
-    return QuadraticKernel.point([mean], weight)
-
-
-def neutral_cell(identity_: CellIdentity, center: float, weight: float = 1.0) -> Cell:
-    parent = QuadraticKernel(1, weight, [0.0], 0.0)
-    plus, minus = parent.neutral_split()
-    return Cell(identity_, [center], plus, minus)
-
-
-def split_cell(identity_: CellIdentity, center: float, branch_mean: float = 1.0) -> Cell:
-    return Cell(
-        identity_,
-        [center],
-        kernel_from_mean(branch_mean),
-        kernel_from_mean(-branch_mean),
-    )
-
-
-class QuadraticKernelTests(unittest.TestCase):
-    def test_half_life_parameter(self) -> None:
-        memory_half_life = 17.0
-        chi = 2.0 ** (-1.0 / memory_half_life)
-        self.assertAlmostEqual(chi**memory_half_life, 0.5)
-
-    def test_update_and_recenter_preserve_structural_power(self) -> None:
-        kernel = QuadraticKernel.zero(2)
-        chi = 0.9
-        for vector, relevance in (
-            ([1.0, 0.0], 1.0),
-            ([-1.0, 0.0], 0.5),
-            ([0.0, 2.0], 0.25),
-        ):
-            kernel.update(vector, relevance, chi)
-        before = kernel.structural_power
-        kernel.recenter(kernel.mean)
-        self.assertTrue(all(abs(value) <= math.ulp(1.0) for value in kernel.S))
-        self.assertAlmostEqual(kernel.structural_power, before, places=13)
-        kernel.validate()
-
-    def test_coordinate_scaling_is_quadratic(self) -> None:
-        kernel = QuadraticKernel.point([2.0, -1.0], 3.0)
-        kernel.scale_coordinates(0.25)
-        self.assertSequenceEqual(list(kernel.mean), [0.5, -0.25])
-        self.assertAlmostEqual(kernel.Q, 3.0 * (0.5**2 + 0.25**2))
-
-    def test_recenter_on_mean_closes_first_moment_exactly(self) -> None:
-        kernel = QuadraticKernel.zero(3)
-        for value, relevance in (
-            ([7.0, -3.0, 0.25], 1.0),
-            ([7.5, -2.0, 0.5], 0.4),
-            ([6.5, -4.0, 0.0], 0.7),
-        ):
-            kernel.update(value, relevance, 0.93)
-        before = kernel.structural_power
-        kernel.recenter_on_mean()
-        self.assertSequenceEqual(list(kernel.S), [0.0, 0.0, 0.0])
-        self.assertAlmostEqual(kernel.Q, before, places=14)
-
-    def test_stable_recenter_preserves_structural_power_under_large_translation(self) -> None:
-        kernel = QuadraticKernel.zero(2)
-        for value in ([1.0e12, -1.0e12], [1.0e12 + 3.0, -1.0e12 + 4.0]):
-            kernel.update(value, 1.0, 0.5)
-        before = kernel.structural_power
-        kernel.recenter([1.0e12, -1.0e12])
-        self.assertAlmostEqual(kernel.structural_power, before, places=12)
-        kernel.validate()
-
-    def test_validation_tolerates_roundoff_but_rejects_material_violation(self) -> None:
-        nearly_valid = QuadraticKernel(1, 1.0, [1.0], math.nextafter(1.0, 0.0))
-        nearly_valid.validate()
-        with self.assertRaises(InvariantViolation):
-            QuadraticKernel(1, 1.0, [1.0], 0.99)
-
-    def test_repeated_decay_crosses_subnormal_range(self) -> None:
-        kernel = QuadraticKernel.point([0.37, -0.91], 1.0)
-        law = MemoryLaw(10.0)
-        for _ in range(12_000):
-            kernel.decay(law.chi, alpha=law.alpha)
-            if kernel.W == 0.0:
-                break
-
-    def test_validation_tolerates_one_subnormal_quantum(self) -> None:
-        left = 5.08550459395e-313
-        right = 5.085504594e-313
-        component = math.sqrt(right)
-        self.assertEqual(component * component, right)
-        QuadraticKernel(2, 1.0, [component, 0.0], left).validate()
-
-
-class NumericalDegeneracyTests(unittest.TestCase):
-    def test_exact_repeated_point_keeps_zero_radius_in_both_formats(self) -> None:
-        point = [-5.0, -0.16, -0.16]
-        for scalar_format in ("f32", "f64"):
-            with self.subTest(scalar_format=scalar_format):
-                network = Auxein.empty(
-                    3,
-                    memory=100,
-                    budget_units=budget_for(3, scalar_format, 2),
-                    scalar=scalar_format,
-                    check_invariants=True,
-                )
-                for _ in range(8):
-                    network.step(point, detailed_report=False)
-                    self.assertEqual(network._layers[0].geometry.radius, 0.0)
-
-    def test_format_closure_does_not_erase_resolved_variance(self) -> None:
-        for scalar_format, variance in (("f32", 1.0e-4), ("f64", 1.0e-12)):
-            with self.subTest(scalar_format=scalar_format):
-                receipt = QuadraticKernel(1, 1.0, [1.0], 1.0 + variance)
-                cell = neutral_cell(CellIdentity._from_token(1), center=1.0)
-                layer = Layer(
-                    1,
-                    0.9,
-                    receipt,
-                    [cell],
-                    Bud.empty(1, [cell.identity], scalar_format=scalar_format),
-                    1,
-                    0,
-                    scalar_format,
-                    0.1,
-                )
-                self.assertGreater(layer.geometry.radius, 0.0)
-
-    def test_root_founder_is_centered_by_construction(self) -> None:
-        network = Auxein.empty(
-            2,
-            memory=50,
-            budget_units=budget_for(2, "f64", 2),
-            scalar="f64",
-            check_invariants=True,
-        )
-        network.step([13.0, -7.0], detailed_report=False)
-        founder = network._layers[0].cells[0]
-        self.assertSequenceEqual(list(founder.plus.S), [0.0, 0.0])
-        self.assertSequenceEqual(list(founder.minus.S), [0.0, 0.0])
-
-    def test_identical_realized_representations_have_exact_zero_capital(self) -> None:
-        receipt = QuadraticKernel(1, 2.0, [0.0], 2.0)
-        left = Cell(
-            CellIdentity._from_token(1),
-            [-1.0],
-            QuadraticKernel.point([1.0], 0.5),
-            QuadraticKernel.point([1.0], 0.5),
-        )
-        right = Cell(
-            CellIdentity._from_token(2),
-            [1.0],
-            QuadraticKernel.point([-1.0], 0.5),
-            QuadraticKernel.point([-1.0], 0.5),
-        )
-        layer = Layer(
-            1,
-            0.9,
-            receipt,
-            [left, right],
-            Bud.empty(1, [left.identity, right.identity]),
-            1,
-            0,
-            "f64",
-            0.1,
-        )
-        self.assertEqual(layer.capital, 0.0)
-
-    def test_stable_capital_matches_aggregate_formula_away_from_degeneracy(self) -> None:
-        receipt = QuadraticKernel(2, 3.0, [0.0, 0.0], 6.0)
-        cells = [
-            Cell(
-                CellIdentity._from_token(1),
-                [-1.0, 0.0],
-                QuadraticKernel.point([0.2, 0.1], 0.5),
-                QuadraticKernel.point([0.2, 0.1], 0.5),
-            ),
-            Cell(
-                CellIdentity._from_token(2),
-                [0.0, 1.0],
-                QuadraticKernel.point([-0.3, 0.4], 0.75),
-                QuadraticKernel.point([-0.3, 0.4], 0.75),
-            ),
-            Cell(
-                CellIdentity._from_token(3),
-                [1.0, -1.0],
-                QuadraticKernel.point([0.1, -0.2], 0.25),
-                QuadraticKernel.point([0.1, -0.2], 0.25),
-            ),
-        ]
-        layer = Layer(
-            2,
-            0.9,
-            receipt,
-            cells,
-            Bud.empty(2, [cell.identity for cell in cells]),
-            1,
-            0,
-            "f64",
-            0.1,
-        )
-        geometry = layer.geometry
-        values = []
-        for cell in cells:
-            z = (cell.center - geometry.mean) / geometry.radius
-            values.append((cell.mass, z + cell.parent_mean))
-        total = math.fsum(weight for weight, _ in values)
-        weighted = [
-            math.fsum(weight * value[axis] for weight, value in values)
-            for axis in range(2)
-        ]
-        aggregate = math.fsum(
-            weight * sum(component * component for component in value)
-            for weight, value in values
-        ) - sum(component * component for component in weighted) / total
-        self.assertAlmostEqual(layer.capital, aggregate, places=13)
-
-    def test_stable_capital_keeps_small_separation_on_large_common_offset(self) -> None:
-        receipt = QuadraticKernel(1, 2.0, [0.0], 2.0)
-        left = Cell(
-            CellIdentity._from_token(11),
-            [0.0],
-            QuadraticKernel.point([1.0e8], 0.5),
-            QuadraticKernel.point([1.0e8], 0.5),
-        )
-        right = Cell(
-            CellIdentity._from_token(12),
-            [0.0],
-            QuadraticKernel.point([1.0e8 + 1.0], 0.5),
-            QuadraticKernel.point([1.0e8 + 1.0], 0.5),
-        )
-        layer = Layer(
-            1,
-            0.9,
-            receipt,
-            [left, right],
-            Bud.empty(1, [left.identity, right.identity]),
-            1,
-            0,
-            "f64",
-            0.1,
-        )
-        self.assertEqual(layer.capital, 0.5)
-        subtractive = (1.0e8**2 + (1.0e8 + 1.0) ** 2) - (
-            (2.0e8 + 1.0) ** 2 / 2.0
-        )
-        self.assertEqual(subtractive, 0.0)
-
-    def test_post_movement_conservation_ignores_rounding_residual_moment(self) -> None:
-        receipt = QuadraticKernel(1, 2.0, [0.0], 2.0)
-        victim = Cell(
-            CellIdentity._from_token(1),
-            [-1.0],
-            QuadraticKernel(1, 0.5, [1.0e-18], 1.0e-30),
-            QuadraticKernel(1, 0.5, [-0.5e-18], 1.0e-30),
-        )
-        survivor = neutral_cell(CellIdentity._from_token(2), center=1.0)
-        layer = Layer(
-            1,
-            0.9,
-            receipt,
-            [victim, survivor],
-            Bud.empty(1, [victim.identity, survivor.identity]),
-            1,
-            0,
-            "f64",
-            0.1,
-        )
-        expected = victim.mass * ((2.0 / layer.geometry.radius) ** 2)
-        self.assertEqual(layer.conservation_value(0), expected)
-
-
-class RoutingAndRecognitionTests(unittest.TestCase):
-    def test_empty_latent_state_routes_first_proof_neutrally(self) -> None:
-        plus = QuadraticKernel.zero(1)
-        minus = QuadraticKernel.zero(1)
-        decision = route_latent(plus, minus, [5.0], 0.8)
-        self.assertEqual(decision.emission_sign, "+")
-        self.assertEqual(decision.r_plus, 0.4)
-        self.assertEqual(decision.r_minus, 0.4)
-
-    def test_zero_axis_nonzero_residual_starts_plus_branch(self) -> None:
-        parent = QuadraticKernel(1, 2.0, [0.0], 0.0)
-        plus, minus = parent.neutral_split()
-        decision = route_latent(plus, minus, [1.0], 0.75)
-        self.assertEqual(decision.emission_sign, "+")
-        self.assertEqual(decision.r_plus, 0.75)
-        self.assertEqual(decision.r_minus, 0.0)
-
-    def test_degenerate_radius_uses_exact_equality(self) -> None:
-        cell = neutral_cell(CellIdentity._from_token(1), center=2.0)
-        a_equal, e_equal = cell.recognition_and_error([2.0], 0.0)
-        a_other, e_other = cell.recognition_and_error([math.nextafter(2.0, math.inf)], 0.0)
-        self.assertEqual(a_equal, 1.0)
-        self.assertTrue(e_equal == [0.0])
-        self.assertEqual(a_other, 0.0)
-        self.assertTrue(e_other == [0.0])
-
-    def test_wta_selects_relatively_but_writes_absolutely(self) -> None:
-        chi = 0.9
-        receipt = QuadraticKernel(1, 1.0, [0.0], 1.0)
-        cells = [
-            neutral_cell(CellIdentity._from_token(1), -1.0),
-            neutral_cell(CellIdentity._from_token(2), 1.0),
-        ]
-        layer = Layer(1, chi, receipt, cells, Bud.empty(1, [c.identity for c in cells]), 1)
-        read = layer.prepare([0.0], 1.0)
-        self.assertEqual(read.winner_slot, 0)
-        self.assertAlmostEqual(read.winner_read.recognition, math.exp(-1.0))
-        self.assertAlmostEqual(read.winner_read.relevance, math.exp(-1.0))
-
-
-class SplitAndCapitalTests(unittest.TestCase):
-    def test_split_gain_and_materialization(self) -> None:
-        factory = IdentityFactory(2)
-        mother_identity = CellIdentity._from_token(1)
-        cell = split_cell(mother_identity, 0.0, branch_mean=1.0)
-        self.assertAlmostEqual(cell.split_gain, 2.0)
-        daughter = cell.materialize_split(1.0, factory)
-        self.assertEqual(cell.identity, mother_identity)
-        self.assertNotEqual(daughter.identity, mother_identity)
-        self.assertAlmostEqual(cell.center[0], 1.0)
-        self.assertAlmostEqual(daughter.center[0], -1.0)
-        self.assertEqual(cell.split_gain, 0.0)
-        self.assertEqual(daughter.split_gain, 0.0)
-
-    def test_layer_capital_increases_by_split_gain(self) -> None:
-        factory = IdentityFactory(2)
-        cell = split_cell(CellIdentity._from_token(1), 0.0, branch_mean=1.0)
-        layer = Layer(
-            1,
-            0.9,
-            QuadraticKernel(1, 1.0, [0.0], 1.0),
-            [cell],
-            Bud.empty(1, [cell.identity]),
-            1,
-        )
-        before = layer.capital
-        gain = cell.split_gain
-        proposal = layer.best_split_proposal(0, ScalarFootprintMaintenance())
-        self.assertIsNotNone(proposal)
-        layer.execute_split(proposal, layer.geometry.radius, factory)
-        after = layer.capital
-        self.assertAlmostEqual(before, 0.0)
-        self.assertAlmostEqual(after - before, gain)
-
-    def test_gamma_marginal_is_not_cell_conservation_value(self) -> None:
-        identities = [CellIdentity._from_token(i) for i in range(1, 4)]
-        cells = [neutral_cell(identity, center) for identity, center in zip(identities, [-1.0, 0.0, 1.0])]
-        layer = Layer(
-            1,
-            0.9,
-            QuadraticKernel(1, 1.0, [0.0], 1.0),
-            cells,
-            Bud.empty(1, identities),
-            1,
-        )
-        gamma_before = layer.capital
-        conservation = layer.conservation_value(1)
-        survivors = [cells[0], cells[2]]
-        reduced = Layer(
-            1,
-            0.9,
-            layer.receipt.clone(),
-            survivors,
-            Bud.empty(1, [c.identity for c in survivors]),
-            2,
-        )
-        self.assertAlmostEqual(gamma_before - reduced.capital, 0.0)
-        self.assertAlmostEqual(conservation, 1.0)
-
-    def test_same_layer_scale_transport_changes_split_power_quadratically(self) -> None:
-        cell = split_cell(CellIdentity._from_token(1), 0.0, branch_mean=2.0)
-        gain = cell.split_gain
-        cell.scale_internal_coordinates(0.5)
-        self.assertAlmostEqual(cell.split_gain, gain * 0.25)
-
-    def test_batched_conservation_matches_scalar_reference(self) -> None:
-        rng = random.Random(73)
-        dimension = 4
-        cells: list[Cell] = []
-        identities: list[CellIdentity] = []
-        for index in range(24):
-            identity = CellIdentity._from_token(index + 1)
-            identities.append(identity)
-            center = [rng.uniform(-3.0, 3.0) for _ in range(dimension)]
-            plus_point = [rng.uniform(-0.8, 0.8) for _ in range(dimension)]
-            minus_point = [rng.uniform(-0.8, 0.8) for _ in range(dimension)]
-            plus = QuadraticKernel.point(plus_point, rng.uniform(0.1, 2.0))
-            minus = QuadraticKernel.point(minus_point, rng.uniform(0.1, 2.0))
-            cells.append(Cell(identity, center, plus, minus))
-
-        receipt = QuadraticKernel.zero(dimension)
-        for _ in range(30):
-            receipt.update(
-                [rng.gauss(0.0, 1.0) for _ in range(dimension)],
-                1.0,
-                0.9,
-            )
-        layer = Layer(
-            dimension,
-            0.9,
-            receipt,
-            cells,
-            Bud.empty(dimension, identities),
-            1,
-        )
-        scalar = [layer.conservation_value(slot) for slot in range(len(cells))]
-        batched = layer._conservation_values()
-        for expected, actual in zip(scalar, batched, strict=True):
-            self.assertAlmostEqual(actual, expected, places=11)
-
-
-class BudTests(unittest.TestCase):
-    def make_bud(self, opposite_second: bool = False) -> Bud:
-        first = CellIdentity._from_token(1)
-        second = CellIdentity._from_token(2)
-        plus = QuadraticKernel.point([1.0], 2.0)
-        minus = QuadraticKernel.point([-1.0], 2.0)
-        second_plus = -1.0 if opposite_second else 1.0
-        second_minus = 1.0 if opposite_second else -1.0
-        owners = {
-            first: OwnerMoments(1, 1.0, [1.0], 1.0, [-1.0]),
-            second: OwnerMoments(
-                1,
-                1.0,
-                [second_plus],
-                1.0,
-                [second_minus],
-            ),
-        }
-        if opposite_second:
-            plus = QuadraticKernel(1, 2.0, [0.0], 2.0)
-            minus = QuadraticKernel(1, 2.0, [0.0], 2.0)
-        bud = Bud(1, plus, minus, owners)
-        bud.validate()
-        return bud
-
-    def test_identical_cross_identity_distinctions_are_positive(self) -> None:
-        bud = self.make_bud(False)
-        self.assertAlmostEqual(bud.split_gain, 4.0)
-        self.assertGreater(bud.concordance, 0.0)
-
-    def test_opposite_cross_identity_distinctions_are_negative(self) -> None:
-        bud = self.make_bud(True)
-        self.assertLess(bud.concordance, 0.0)
-
-    def test_single_identity_has_zero_concordance(self) -> None:
-        identity = CellIdentity._from_token(1)
-        owner = OwnerMoments(1, 1.0, [1.0], 1.0, [-1.0])
-        bud = Bud(
-            1,
-            QuadraticKernel.point([1.0], 1.0),
-            QuadraticKernel.point([-1.0], 1.0),
-            {identity: owner},
-        )
-        self.assertEqual(bud.concordance, 0.0)
-
-    def test_single_identity_numerical_cancellation_stays_exactly_zero(self) -> None:
-        identity = CellIdentity._from_token(9001)
-        weight = 3.1376477997153496e-08
-        distinction = -0.6444550101251245
-        branch_mass = 2.0 * weight
-        owner = OwnerMoments(
-            1,
-            branch_mass,
-            [branch_mass * distinction / 2.0],
-            branch_mass,
-            [-branch_mass * distinction / 2.0],
-        )
-        bud = Bud.empty(1, [identity])
-        bud.owners[identity] = owner
-        self.assertEqual(bud.concordance, 0.0)
-
-    def test_incremental_concordance_matches_explicit_cross_owner_formula(self) -> None:
-        identities = [CellIdentity._from_token(9101), CellIdentity._from_token(9102), CellIdentity._from_token(9103)]
-        bud = Bud.empty(1, identities)
-        moments = [
-            OwnerMoments(1, 2.0, [3.0], 1.0, [-0.5]),
-            OwnerMoments(1, 1.5, [-1.5], 0.75, [-0.75]),
-            OwnerMoments(1, 0.8, [0.4], 1.2, [-0.9]),
-        ]
-        for identity, owner in zip(identities, moments, strict=True):
-            bud.owners[identity] = owner
-        active = [owner.distinction for owner in moments]
-        total = sum(weight for weight, _ in active)
-        expected = 2.0 * sum(
-            active[i][0] * active[j][0] * active[i][1][0] * active[j][1][0]
-            for i in range(len(active))
-            for j in range(i + 1, len(active))
-        ) / total
-        self.assertAlmostEqual(bud.concordance, expected, places=15)
-
-    def test_terminal_death_resets_bud_and_keeps_survivor_records(self) -> None:
-        bud = self.make_bud(False)
-        cells = [neutral_cell(identity, center) for identity, center in zip(bud.owners, [-1.0, 1.0])]
-        layer = Layer(
-            1,
-            0.9,
-            QuadraticKernel(1, 1.0, [0.0], 1.0),
-            cells,
-            bud,
-            1,
-        )
-        offer = layer.best_cell_contraction_offer(0, ScalarFootprintMaintenance())
-        self.assertIsNotNone(offer)
-        layer.execute_death(offer.token)
-        self.assertEqual(len(layer.cells), 1)
-        self.assertEqual(layer.bud.parent.W, 0.0)
-        self.assertEqual(set(layer.bud.owners), {layer.cells[0].identity})
-
-
-class NetworkTests(unittest.TestCase):
-    def test_public_surface_is_deliberately_small(self) -> None:
-        self.assertEqual(
-            set(auxein_module.__all__),
-            {
-                "Auxein",
-                "AuxeinError",
-                "BudgetValue",
-                "InsolventState",
-                "InvalidStateOperation",
-                "InvariantViolation",
-                "LayerStepReport",
-                "MaintenanceModel",
-                "MODEL_VERSION",
-                "ScalarFootprintMaintenance",
-                "Scalar",
-                "STATE_SCHEMA_VERSION",
-                "StepReport",
-                "TransformationKind",
-                "TransformationRecord",
-                "__version__",
-            },
-        )
-
-    def test_public_memory_scalar_and_seed_names_are_canonical(self) -> None:
-        network = Auxein.from_seed(
-            [0.0],
-            memory=12.5,
-            budget=2,
-            scalar="f32",
-        )
-        self.assertEqual(network.memory, 12.5)
-        self.assertEqual(network.scalar, "f32")
-        self.assertFalse(hasattr(network, "scalar_format"))
-        self.assertFalse(hasattr(Auxein, "seeded"))
-        self.assertTrue(hasattr(Auxein, "from_seed"))
-
-        state = network.to_state_dict()
-        self.assertEqual(state["memory"], 12.5)
-        self.assertEqual(state["scalar"], "f32")
-        self.assertNotIn("t_mem", state)
-        self.assertNotIn("scalar_format", state)
-
-        with self.assertRaises(TypeError):
-            Auxein.empty(1, budget=1, **{"t_mem": 10.0})
-        with self.assertRaises(TypeError):
-            Auxein.empty(1, memory=10.0, budget=1, **{"scalar_format": "f64"})
-        with self.assertRaises(AttributeError):
-            network.memory = 20.0  # type: ignore[misc]
-        with self.assertRaises(AttributeError):
-            network.scalar = "f64"  # type: ignore[misc]
-
-    def test_public_budget_and_budget_units_share_one_canonical_conversion(self) -> None:
-        maintenance_model = ScalarFootprintMaintenance()
-        network = Auxein.empty(
-            2,
-            memory=10.0,
-            budget=Decimal("3.25"),
-            maintenance_model=maintenance_model,
-            scalar="f64",
-        )
-        self.assertEqual(
-            network.budget_units,
-            maintenance_model.budget_to_units(2, "f64", Decimal("3.25")),
-        )
-        self.assertEqual(network.budget, Decimal("3.25"))
-
-        network.budget = Decimal("0")
-        self.assertEqual(
-            network.budget_units,
-            maintenance_model.root_substrate_units(2, "f64"),
-        )
-        network.budget_units = maintenance_model.budget_to_units(2, "f64", 7)
-        self.assertEqual(network.budget, Decimal(7))
-
-        with self.assertRaises(TypeError):
-            Auxein.empty(1, memory=10.0)
-        with self.assertRaises(TypeError):
-            Auxein.empty(1, memory=10.0, budget=1, budget_units=100)
-        with self.assertRaises(TypeError):
-            Auxein.empty(1, memory=10.0, budget="not-a-budget")
-        with self.assertRaises(TypeError):
-            network.budget_units = 1.5  # type: ignore[assignment]
-
-        for obsolete_name in (
-            "network_cost",
-            "root_bud_cost",
-            "layer_cost",
-            "cell_cost",
-            "bud_base_cost",
-            "owner_record_cost",
-        ):
-            self.assertFalse(hasattr(maintenance_model, obsolete_name))
-
-    def test_budget_margin_and_solvency_are_structural_properties(self) -> None:
-        network = Auxein.empty(1, memory=10.0, budget=1)
-        self.assertEqual(
-            network.budget_margin_units,
-            network.budget_units - network.maintenance_units(),
-        )
-        self.assertTrue(network.is_solvent)
-
-        network.budget_units = network.maintenance_units() - 1
-        self.assertEqual(network.budget_margin_units, -1)
-        self.assertFalse(network.is_solvent)
-
-    def test_compact_report_uses_none_for_omitted_diagnostics(self) -> None:
-        network = Auxein.from_seed([0.0], memory=10.0, budget=2)
-        report = network.step([0.5], detailed_report=False)
-        self.assertEqual(report.layer_reports, ())
-        self.assertIsNone(report.vertical_gain)
-        self.assertIsNone(report.vertical_concordance)
-
-    def test_eta_scales_learning_and_zero_freezes_voluntary_adaptation(self) -> None:
-        full = Auxein.empty(1, memory=10.0, budget=0, eta=1.0)
-        half = Auxein.empty(1, memory=10.0, budget=0, eta=0.5)
-        stopped = Auxein.empty(1, memory=10.0, budget=0, eta=0.0)
-        full.step([2.0], detailed_report=False)
-        half.step([2.0], detailed_report=False)
-        stopped.step([2.0], detailed_report=False)
-        self.assertAlmostEqual(half._root_bud.kernel.W, 0.5 * full._root_bud.kernel.W)
-        self.assertEqual(stopped._root_bud.kernel.W, 0.0)
-        self.assertAlmostEqual(half.effective_alpha, 0.5 * full.alpha)
-
-        frozen = Auxein.from_seed([0.0], memory=10.0, budget=10, eta=0.0)
-        before = frozen.to_state_dict()
-        report = frozen.step([10.0], detailed_report=True)
-        after = frozen.to_state_dict()
-        after["step_index"] = before["step_index"]
-        self.assertEqual(after, before)
-        self.assertEqual(report.transformations, ())
-        self.assertEqual(len(report.layer_reports), 1)
-
-    def test_eta_is_validated_and_serialized(self) -> None:
-        for invalid in (-0.1, 1.1, math.nan, math.inf):
-            with self.subTest(invalid=invalid):
-                with self.assertRaises(ValueError):
-                    Auxein.empty(1, memory=10.0, budget=1, eta=invalid)
-        for invalid_type in (True, "0.5"):
-            with self.subTest(invalid_type=invalid_type):
-                with self.assertRaises(TypeError):
-                    Auxein.empty(1, memory=10.0, budget=1, eta=invalid_type)  # type: ignore[arg-type]
-
-        network = Auxein.empty(1, memory=10.0, budget=1, eta=0.25)
-        state = network.to_state_dict()
-        self.assertEqual(state["eta"], 0.25)
-        restored = Auxein.from_state_dict(state, budget=network.budget)
-        self.assertEqual(restored.eta, 0.25)
-        self.assertEqual(restored.to_state_dict(), state)
-
-    def test_vertical_birth_consumes_bud_and_creates_fresh_terminal_bud(self) -> None:
-        net = Auxein.from_seed([0.0], memory=10.0, budget_units=budget_for(1, "f64", 100))
-        root = net._terminal
-        identities = [root.cells[0].identity, net._identity_factory.new()]
-        # Add a second terminal Cell solely so the bud's two owner identities are canonical.
-        root.cells.append(neutral_cell(identities[1], 2.0))
-        root.bud = Bud.empty(1, identities)
-        root.bud.plus = QuadraticKernel.point([1.0], 2.0)
-        root.bud.minus = QuadraticKernel.point([-1.0], 2.0)
-        root.bud.owners = {
-            identities[0]: OwnerMoments(1, 1.0, [1.0], 1.0, [-1.0]),
-            identities[1]: OwnerMoments(1, 1.0, [1.0], 1.0, [-1.0]),
-        }
-        root.validate()
-        proposal = net._vertical_proposal()
-        self.assertIsNotNone(proposal)
-        net._execute_vertical_birth(proposal)
-        self.assertEqual(len(net._layers), 2)
-        self.assertIsNone(net._layers[0].bud)
-        self.assertEqual(len(net._layers[1].cells), 2)
-        self.assertEqual(net._layers[1].bud.parent.W, 0.0)
-        self.assertEqual(set(net._layers[1].bud.owners), {c.identity for c in net._layers[1].cells})
-        self.assertTrue(all(cell.split_gain == 0.0 for cell in net._layers[1].cells))
-
-    def make_saturated_reallocation_network(self, budget: int | None = None) -> Auxein:
-        chi = 0.9
-        factory = IdentityFactory(3)
-        q = split_cell(CellIdentity._from_token(1), 0.0, branch_mean=2.0)
-        victim = neutral_cell(CellIdentity._from_token(2), 0.1, weight=1.0)
-        receipt = QuadraticKernel(1, 1.0, [0.0], 1.0)
-        bud = Bud.empty(1, [q.identity, victim.identity])
-        layer = Layer(1, chi, receipt, [q, victim], bud, 1)
-        net = Auxein._from_parts(
-            dimension=1,
-            memory=math.log(0.5) / math.log(chi),
-            budget_units=10**9,
-            maintenance_model=ScalarFootprintMaintenance(),
-            layers=[layer],
-            identity_factory=factory,
-        )
-        net.budget_units = net.maintenance_units() if budget is None else int(budget)
-        return net
-
-    def test_voluntary_reallocation_is_dry_and_delayed(self) -> None:
-        net = self.make_saturated_reallocation_network()
-        report = net.step([0.0])
-        kinds = [record.kind for record in report.transformations]
-        self.assertIn("horizontal_reallocation_death", kinds)
-        self.assertNotIn("split", kinds)
-        self.assertEqual(len(net._layers[0].cells), 1)
-        self.assertEqual(report.remaining_step_budget_units, 0.0)
-        self.assertLess(report.maintenance_units, report.maintenance_charged_units)
-
-        next_report = net.step([0.0])
-        self.assertIn("split", [record.kind for record in next_report.transformations])
-
-    def test_forced_solvency_can_truncate_layer_zero_before_perception(self) -> None:
-        one_active = budget_for(1, "f64", 1)
-        net = self.make_saturated_reallocation_network(one_active - 1)
-        report = net.step([0.0])
-        self.assertIn("truncate", [record.kind for record in report.transformations])
-        self.assertLessEqual(report.maintenance_charged_units, net.budget_units)
-        self.assertEqual(len(net._layers), 0)
-        self.assertGreater(net._root_bud.kernel.W, 0.0)
-
-    def test_eta_zero_keeps_forced_solvency_active(self) -> None:
-        one_active = budget_for(1, "f64", 1)
-        net = self.make_saturated_reallocation_network(one_active - 1)
-        net.eta = 0.0
-        report = net.step([0.0])
-        self.assertIn("truncate", [record.kind for record in report.transformations])
-        self.assertLessEqual(report.maintenance_charged_units, net.budget_units)
-        self.assertEqual(len(net._layers), 0)
-        self.assertEqual(net._root_bud.kernel.W, 0.0)
-
-    def test_root_bud_warms_up_and_reincarnates_layer_zero(self) -> None:
-        one_active = budget_for(1, "f64", 1)
-        net = Auxein.from_seed([0.0], memory=10.0, budget_units=one_active - 1)
-        report = net.step([1.0])
-        self.assertIn("truncate", [record.kind for record in report.transformations])
-        self.assertEqual(len(net._layers), 0)
-        self.assertGreater(net._root_bud.kernel.W, 0.0)
-
-        # The root bud is persistent but cannot materialize topology while the
-        # economic veto remains active.
-        second = net.step([0.0])
-        self.assertEqual(len(net._layers), 0)
-        self.assertGreater(net._root_bud.kernel.W, 0.0)
-
-        net.budget_units = one_active
-        third = net.step([0.5])
-        self.assertIn("root_birth", [record.kind for record in third.transformations])
-        self.assertEqual(len(net._layers), 1)
-        self.assertEqual(len(net._layers[0].cells), 1)
-        self.assertEqual(net._root_bud.kernel.W, 0.0)
-
-    def test_random_stream_preserves_invariants(self) -> None:
-        rng = random.Random(7)
-        net = Auxein.from_seed([0.0, 0.0, 0.0], memory=25.0, budget_units=budget_for(3, "f64", 100))
-        for _ in range(250):
-            net.step([rng.gauss(0.0, 1.0) for _ in range(3)])
-        net.validate()
-        self.assertGreaterEqual(len(net._layers), 1)
-
-    def test_invariant_checks_do_not_change_the_causal_trajectory(self) -> None:
-        budget = budget_for(2, "f64", 20)
-        checked = Auxein.empty(
-            2,
-            memory=25.0,
-            budget_units=budget,
-            check_invariants=True,
-        )
-        unchecked = Auxein.empty(
-            2,
-            memory=25.0,
-            budget_units=budget,
-            check_invariants=False,
-        )
-        rng = random.Random(991)
-        for _ in range(150):
-            value = [rng.gauss(0.0, 1.0), rng.gauss(0.0, 1.0)]
-            report_checked = checked.step(value, detailed_report=False)
-            report_unchecked = unchecked.step(value, detailed_report=False)
-            self.assertEqual(report_checked.transformations, report_unchecked.transformations)
-            self.assertEqual(checked.to_state_dict(), unchecked.to_state_dict())
-
-    def test_proposals_are_opaque_to_network_level(self) -> None:
-        net = self.make_saturated_reallocation_network(10**9)
-        proposal = net._layers[0].best_split_proposal(0, net.maintenance_model)
-        self.assertIsNotNone(proposal)
-        self.assertFalse(hasattr(proposal, "cell_identity"))
-        self.assertFalse(hasattr(proposal, "victim_identity"))
-
-    def test_empty_network_has_only_root_bud_maintenance(self) -> None:
-        net = Auxein.empty(3, memory=10.0, budget_units=budget_for(3, "f64", 1))
-        self.assertEqual(len(net._layers), 0)
-        self.assertIsInstance(net._root_bud, RootBud)
-        self.assertEqual(
-            net.maintenance_units(),
-            ScalarFootprintMaintenance().root_substrate_units(3, "f64"),
-        )
-        report = net.step([1.0, 2.0, 3.0])
-        self.assertIn("root_birth", [record.kind for record in report.transformations])
-        self.assertEqual(len(net._layers), 1)
-
-    def test_literal_positive_gain_can_split_after_one_informative_write(self) -> None:
-        net = Auxein.from_seed([0.0], memory=100.0, budget_units=budget_for(1, "f64", 100))
-        net.step([1.0])  # widens the layer receipt; radius was initially zero
-        report = net.step([-1.0])
-        splits = [record for record in report.transformations if record.kind == "split"]
-        self.assertEqual(len(splits), 1)
-        self.assertGreater(splits[0].geometric_value, 0.0)
-
-
-    def test_memory_law_remains_stable_for_extreme_half_life(self) -> None:
-        law = MemoryLaw(1e20)
-        self.assertGreater(law.alpha, 0.0)
-        self.assertEqual(law.chi, 1.0)
-        kernel = QuadraticKernel.zero(1)
-        kernel.update([1.0], 1.0, law.chi, alpha=law.alpha)
-        self.assertGreater(kernel.W, 0.0)
-
-    def test_f32_f64_budget_abstraction_and_rounding(self) -> None:
-        maintenance = ScalarFootprintMaintenance()
-        budget32 = budget_for(2, "f32", 10)
-        budget64 = budget_for(2, "f64", 10)
-        self.assertGreater(budget64, budget32)
-        self.assertEqual(
-            (budget32 - maintenance.root_substrate_units(2, "f32") - maintenance.active_shell_units(2, "f32"))
-            // maintenance.equivalent_cell_units(2, "f32"),
-            10,
-        )
-        self.assertEqual(
-            (budget64 - maintenance.root_substrate_units(2, "f64") - maintenance.active_shell_units(2, "f64"))
-            // maintenance.equivalent_cell_units(2, "f64"),
-            10,
-        )
-
-        root_only = maintenance.root_substrate_units(1, "f32")
-        net = Auxein.empty(1, memory=10.0, budget_units=root_only, scalar="f32")
-        net.step([0.1], detailed_report=False)
-        policy = NumericPolicy("f32")
-        self.assertEqual(net._root_bud.kernel.W, policy.cast(net._root_bud.kernel.W))
-        self.assertEqual(net._root_bud.kernel.S[0], policy.cast(net._root_bud.kernel.S[0]))
-
-
-    def test_economy_remains_exact_above_binary64_integer_resolution(self) -> None:
-        huge_budget = 10**30 + 123
-        net = Auxein.empty(
-            1, memory=10.0, budget_units=huge_budget, scalar="f64"
-        )
-        maintenance = net.maintenance_units()
-        self.assertIsInstance(maintenance, int)
-        self.assertEqual((huge_budget - maintenance) + maintenance, huge_budget)
-
-    def test_strict_serialization_round_trip_and_replay(self) -> None:
-        budget = budget_for(2, "f32", 20)
-        first = Auxein.empty(
-            2, memory=37.0, budget_units=budget, scalar="f32"
-        )
-        prefix = [[0.1, 0.2], [1.0, -1.0], [-1.0, 1.0], [0.3, 0.4]]
-        for value in prefix:
-            first.step(value, detailed_report=False)
-        state = first.to_state_dict()
+
+from auxein import Auxein, Kernel, Layer
+
+
+class KernelTests(unittest.TestCase):
+    def test_merge_matches_total_variance(self) -> None:
+        a = Kernel(2.0, (0.0,), 1.0)
+        b = Kernel(3.0, (4.0,), 2.0)
+        merged = a.merged(b)
+        self.assertEqual(merged.W, 5.0)
+        self.assertAlmostEqual(merged.C[0], 2.4)
+        expected = (2 * 1 + 3 * 2) / 5 + (2 * 3 / 25) * 16
+        self.assertAlmostEqual(merged.V, expected)
+
+    def test_merge_preserves_internal_variance(self) -> None:
+        a = Kernel(0.5, (2.0,), 3.0)
+        b = Kernel(0.5, (2.0,), 7.0)
+        merged = a.merged(b)
+        self.assertEqual(merged.C, (2.0,))
+        self.assertEqual(merged.V, 5.0)
+
+    def test_ema_without_target_is_homothetic_forgetting(self) -> None:
+        h = Kernel(2.0, (3.0,), 4.0)
+        target = Kernel(1.0, (99.0,), 5.0)
+        out = h.ema(target, 0.0, 1.0)
+        self.assertEqual(out, h)
+
+
+class CanonTests(unittest.TestCase):
+    def make(self, **kwargs: object) -> Auxein:
+        defaults = dict(dimension=1, memory=10.0, eta=1.0, scalar="f64", budget=100)
+        defaults.update(kwargs)
+        return Auxein(**defaults)
+
+    @staticmethod
+    def exact_pair_cells() -> list[Kernel]:
+        return [Kernel(1.0, (1.0,), 0.0), Kernel(1.0, (3.0,), 0.0)]
+
+    def test_packing(self) -> None:
+        n = self.make(budget=0)
+        self.assertEqual(n.kernel_units, 24)
+        self.assertEqual(n.network_units, 49)
+        self.assertEqual(n.min_units, 65)
+        self.assertEqual(n.budget_units, 65)
+        self.assertEqual(n.maintenance_units(), 65)
+
+    def test_external_presentation_is_uniform_point_kernels(self) -> None:
+        n = self.make()
+        atoms = n._presentation([[-2.0], [2.0]])
+        self.assertEqual([(a.W, a.C, a.V) for a in atoms], [(0.5, (-2.0,), 0.0), (0.5, (2.0,), 0.0)])
+
+    def test_external_duplicate_coalescence(self) -> None:
+        n = self.make()
+        a = n._presentation([[2.0]])
+        b = n._presentation([[2.0], [2.0], [2.0], [2.0]])
+        self.assertEqual(a, b)
+
+    def test_first_occurrence_seeds_but_does_not_promote(self) -> None:
+        n = self.make()
+        report = n.step([[2.0]])
+        self.assertEqual(report["readout"], [])
+        self.assertEqual(n.summary()["cells_per_layer"], [0])
+        self.assertEqual(n.summary()["sigma_per_layer"], [1])
+        self.assertEqual(n.layers[0].sigma[0].V, 0.0)
+
+    def test_recurrence_promotes_only_after_later_occurrence(self) -> None:
+        n = self.make()
+        n.step([[2.0]])
+        report = n.step([[2.0]], detailed_report=True)
+        self.assertEqual(report["readout"], [])
+        self.assertEqual(n.layers[0].cells[0].C, (2.0,))
+        self.assertEqual(report["layer_reports"][0]["promoted"], 1)
+        third = n.step([[2.0]])
+        self.assertEqual(third["readout"], [["auxein", [2.0], [2.0]]])
+
+    def test_zero_is_not_learned_or_emitted(self) -> None:
+        n = self.make()
+        for _ in range(5):
+            report = n.step([[0.0]])
+            self.assertEqual(report["readout"], [])
+        self.assertEqual(n.summary()["cells_per_layer"], [0])
+        self.assertEqual(n.summary()["sigma_per_layer"], [0])
+
+    def test_internal_variance_participates_in_second_concern_bound(self) -> None:
+        n = self.make(eta=0.0)
+        memory = Kernel(1.0, (2.0,), 1.0)
+        norm = 4.0
+        close = Kernel(1.0, (2.0,), 0.5)
+        broad = Kernel(1.0, (2.0,), 6.0)
+        self.assertTrue(n._concern(memory, norm, close, 4.0)[0])
+        self.assertFalse(n._concern(memory, norm, broad, 4.0)[0])
+        self.assertEqual(n._concern(memory, norm, close, 4.0)[1], 4.0)
+
+    def test_multi_winner_allocation_is_conservative(self) -> None:
+        n = self.make(eta=0.0)
+        n.layers[0].cells = [Kernel(1.0, (1.0,), 10.0), Kernel(3.0, (2.0,), 10.0)]
+        report = n.step([[3.0]], detailed_report=True)
+        layer = report["layer_reports"][0]
+        masses = layer["cell_responsibility_mass"]
+        self.assertEqual(len(report["readout"]), 2)
+        self.assertAlmostEqual(math.fsum(masses), 1.0)
+        self.assertAlmostEqual(masses[0], 5.0 / 29.0)
+        self.assertAlmostEqual(masses[1], 24.0 / 29.0)
+
+    def test_context_geometry_ignores_learning_responsibility(self) -> None:
+        a = self.make(eta=0.0)
+        b = self.make(eta=0.0)
+        a.layers[0].cells = [Kernel(1.0, (1.0,), 10.0), Kernel(1.0, (2.0,), 10.0)]
+        b.layers[0].cells = [Kernel(1.0, (1.0,), 10.0), Kernel(100.0, (2.0,), 10.0)]
+        ra = a.step([[3.0]], detailed_report=True)["layer_reports"][0]
+        rb = b.step([[3.0]], detailed_report=True)["layer_reports"][0]
+        self.assertNotEqual(ra["cell_responsibility_mass"], rb["cell_responsibility_mass"])
+        self.assertEqual(ra["context_center"], rb["context_center"])
+        self.assertEqual(ra["context_variance"], rb["context_variance"])
+        self.assertEqual(ra["output_mass"], rb["output_mass"])
+
+    def test_context_mass_is_recognised_input_mass(self) -> None:
+        n = self.make(eta=0.0)
+        n.layers[0].cells = self.exact_pair_cells()
+        report = n.step([[1.0], [3.0], [-10.0]], detailed_report=True)
+        layer = report["layer_reports"][0]
+        self.assertAlmostEqual(layer["input_mass"], 1.0)
+        self.assertAlmostEqual(layer["output_mass"], 2.0 / 3.0)
+        self.assertEqual(layer["context_center"], [2.0])
+        self.assertEqual(layer["context_variance"], 1.0)
+
+    def test_per_atom_multi_recognition_does_not_duplicate_mass(self) -> None:
+        n = self.make(eta=0.0)
+        n.layers[0].cells = [Kernel(1.0, (1.0,), 10.0), Kernel(1.0, (2.0,), 10.0)]
+        report = n.step([[3.0]], detailed_report=True)
+        layer = report["layer_reports"][0]
+        self.assertEqual(layer["context_center"], [1.5])
+        self.assertEqual(layer["context_variance"], 0.25)
+        self.assertEqual(layer["output_mass"], 1.0)
+
+    def test_single_recognised_value_is_vertical_silence(self) -> None:
+        n = self.make(eta=0.0)
+        n.layers[0].cells = [Kernel(1.0, (2.0,), 0.0)]
+        report = n.step([[2.0]], detailed_report=True)
+        layer = report["layer_reports"][0]
+        self.assertTrue(report["readout"])
+        self.assertEqual(layer["context_center"], [2.0])
+        self.assertEqual(layer["context_variance"], 0.0)
+        self.assertFalse(layer["context_emitted"])
+        self.assertEqual(layer["output_atom_count"], 0)
+
+    def test_zero_center_context_is_vertical_silence(self) -> None:
+        n = self.make(eta=0.0)
+        n.layers[0].cells = [Kernel(1.0, (-1.0,), 0.0), Kernel(1.0, (1.0,), 0.0)]
+        report = n.step([[-1.0], [1.0]], detailed_report=True)
+        layer = report["layer_reports"][0]
+        self.assertEqual(layer["context_center"], [0.0])
+        self.assertEqual(layer["context_variance"], 1.0)
+        self.assertFalse(layer["context_emitted"])
+
+    def test_perfect_pair_emits_context_instead_of_zero_differences(self) -> None:
+        n = self.make(eta=0.0)
+        n.layers[0].cells = self.exact_pair_cells()
+        report = n.step([[1.0], [3.0]], detailed_report=True)
+        layer = report["layer_reports"][0]
+        self.assertEqual(layer["context_center"], [2.0])
+        self.assertEqual(layer["context_variance"], 1.0)
+        self.assertTrue(layer["context_emitted"])
+        self.assertEqual(layer["output_mass"], 1.0)
+
+    def test_constant_input_with_two_explanations_does_not_build_deep_cascade(self) -> None:
+        n = self.make(budget=1000)
+        n.layers[0].cells = [Kernel(1.0, (1.0,), 1.0), Kernel(1.0, (2.0,), 1.0)]
+        for _ in range(40):
+            n.step([[1.5]])
+        self.assertLessEqual(len(n.layers), 2)
+        if len(n.layers) == 2:
+            self.assertLessEqual(len(n.layers[1].cells), 1)
+
+    def test_context_frontier_and_higher_learning_stop_after_one_context_cell(self) -> None:
+        n = self.make(budget=1000)
+        n.layers[0].cells = self.exact_pair_cells()
+        first = n.step([[1.0], [3.0]], detailed_report=True)
+        self.assertEqual(n.summary()["layer_count"], 2)
+        self.assertEqual(len(first["layer_reports"]), 1)  # new L1 did not read this step
+        self.assertTrue(any(t.get("layer_created") for t in first["transformations"]))
+
+        second = n.step([[1.0], [3.0]], detailed_report=True)
+        self.assertEqual(n.summary()["sigma_per_layer"], [0, 1])
+        self.assertEqual(second["layer_reports"][1]["context_variance"], None)
+
+        third = n.step([[1.0], [3.0]], detailed_report=True)
+        self.assertEqual(n.summary()["cells_per_layer"], [2, 1])
+        fourth = n.step([[1.0], [3.0]], detailed_report=True)
+        self.assertEqual(n.summary()["layer_count"], 2)
+        self.assertFalse(fourth["layer_reports"][1]["context_emitted"])
+
+    def test_context_coalescence_split_invariance(self) -> None:
+        a = self.make(eta=0.0)
+        b = self.make(eta=0.0)
+        a.layers[0].cells = self.exact_pair_cells()
+        b.layers[0].cells = self.exact_pair_cells()
+        ra = a.step([[1.0], [3.0]], detailed_report=True)["layer_reports"][0]
+        rb = b.step([[1.0], [1.0], [3.0], [3.0]], detailed_report=True)["layer_reports"][0]
+        for key in ("output_mass", "context_center", "context_variance", "context_emitted"):
+            self.assertEqual(ra[key], rb[key])
+        self.assertEqual(a.export_state(), b.export_state())
+
+    def test_permutation_invariance(self) -> None:
+        a = self.make()
+        b = self.make()
+        p1 = [[-2.0], [1.0], [4.0], [1.0]]
+        p2 = [[1.0], [4.0], [1.0], [-2.0]]
+        for _ in range(4):
+            a.step(p1)
+            b.step(p2)
+        self.assertEqual(a.export_state(), b.export_state())
+
+    def test_eta_zero_freezes_state_but_not_context_or_readout(self) -> None:
+        n = self.make(eta=0.0)
+        n.layers[0].cells = self.exact_pair_cells()
+        before = n.export_state()
+        report = n.step([[1.0], [3.0]], detailed_report=True)
+        after = n.export_state()
+        self.assertEqual(before["layers"], after["layers"])
+        self.assertEqual(after["steps_seen"], before["steps_seen"] + 1)
+        self.assertEqual(len(report["readout"]), 2)
+        self.assertTrue(report["layer_reports"][0]["context_emitted"])
+        self.assertEqual(len(n.layers), 1)  # beta=0 forbids frontier creation
+
+    def test_readout_contract_keeps_only_vectors(self) -> None:
+        n = self.make(universe="lab", eta=0.0)
+        n.layers[0].cells = [Kernel(1.0, (2.0,), 1.0)]
+        rec = n.step([[2.0]])["readout"][0]
+        self.assertEqual(rec, ["lab", [2.0], [2.0]])
+
+    def test_growth_transaction_is_all_or_nothing(self) -> None:
+        n = self.make(budget=1)
+        report = n.step([[-2.0], [2.0]])
+        self.assertEqual(n.summary()["sigma_per_layer"], [0])
+        self.assertTrue(any(t["type"] == "reject" for t in report["transformations"]))
+
+        m = self.make(budget=2)
+        m.step([[-2.0], [2.0]])
+        self.assertEqual(m.summary()["sigma_per_layer"], [2])
+
+    def test_frontier_layer_is_in_same_growth_transaction_as_seeds(self) -> None:
+        # L0 already knows a context and also sees an unrelated unknown atom.
+        n = self.make(budget=1000)
+        n.layers[0].cells = self.exact_pair_cells()
+        report = n.step([[1.0], [3.0], [10.0]])
+        growth = [t for t in report["transformations"] if t["phase"] == "growth"][-1]
+        self.assertEqual(growth["type"], "commit")
+        self.assertEqual(growth["seeds"], 1)
+        self.assertTrue(growth["layer_created"])
+
+    def test_forced_solvency_destroys_work_then_knowledge(self) -> None:
+        n = self.make(budget=20)
+        for x in (-2.0, 2.0, -2.0, 2.0, -2.0, 2.0):
+            n.step([[x]])
+        self.assertGreater(sum(n.summary()["cells_per_layer"]), 0)
+        n.set_budget(budget=0)
+        report = n.step([[0.0]])
+        self.assertEqual(n.summary()["layer_count"], 1)
+        self.assertEqual(n.summary()["cells_per_layer"], [0])
+        self.assertEqual(n.summary()["sigma_per_layer"], [0])
+        kinds = {(t["phase"], t["type"]) for t in report["transformations"]}
+        self.assertIn(("solvency", "destroy_cells"), kinds)
+
+    def test_cell_value_ignores_support(self) -> None:
+        a = Kernel(1e-9, (3.0,), 1.0)
+        b = Kernel(1000.0, (3.0,), 1.0)
+        self.assertEqual(Auxein.cell_value(a), Auxein.cell_value(b))
+
+    def test_roundtrip(self) -> None:
+        n = self.make(universe="roundtrip")
+        for x in (-2.0, 2.0, -2.0, 2.0, -2.0):
+            n.step([[x]])
+        state = n.export_state()
+        restored = Auxein.from_state(state, budget_units=n.budget_units, universe=n.universe)
+        self.assertEqual(restored.export_state(), state)
+        self.assertEqual(restored.summary()["budget_units"], n.budget_units)
+
+    def test_import_rejects_sigma_already_covered_by_cell(self) -> None:
+        n = self.make()
+        state = n.export_state()
+        state["layers"][0]["cells"] = [{"W": 1.0, "C": [2.0], "V": 1.0}]
+        state["layers"][0]["sigma"] = [{"W": 1.0, "C": [2.0], "V": 0.0}]
+        with self.assertRaises(ValueError):
+            Auxein.from_state(state, budget_units=n.budget_units)
+
+    def test_f32_persistent_projection(self) -> None:
+        n = self.make(scalar="f32", memory=10.1, eta=0.7)
+        state = n.export_state()
+        self.assertNotEqual(state["memory"], 10.1)
+        restored = Auxein.from_state(state, budget_units=n.budget_units, universe=n.universe)
+        self.assertEqual(restored.export_state(), state)
+
+    def test_budget_is_not_serialized(self) -> None:
+        n = self.make()
+        state = n.export_state()
+        self.assertNotIn("budget", state)
         self.assertNotIn("budget_units", state)
-        restored = Auxein.from_state_dict(
-            json.loads(json.dumps(state, allow_nan=False)),
-            budget_units=budget,
-        )
-        self.assertEqual(state, restored.to_state_dict())
 
-        for value in [[0.5, 0.6], [-0.25, 0.75]]:
-            report_a = first.step(value, detailed_report=False)
-            report_b = restored.step(value, detailed_report=False)
-            self.assertEqual(first.to_state_dict(), restored.to_state_dict())
-            self.assertEqual(report_a.transformations, report_b.transformations)
-
-        extended = copy.deepcopy(state)
-        extended["surprise"] = {"opaque": [1, True, "x"]}
-        extended_restored = Auxein.from_state_dict(extended, budget_units=budget)
-        self.assertEqual(extended_restored.to_state_dict()["surprise"], extended["surprise"])
-
-        malformed = copy.deepcopy(state)
-        malformed["root_bud"]["surprise"] = 1
-        with self.assertRaises(ValueError):
-            Auxein.from_state_dict(malformed, budget_units=budget)
-
-    def test_benchmark_uses_canonical_public_options(self) -> None:
-        from benchmark import build_parser
-
-        parser = build_parser()
-        args = parser.parse_args(
-            [
-                "--scalar",
-                "f32",
-                "--memory",
-                "50",
-                "--steps",
-                "1",
-                "--warmup",
-                "0",
-            ]
-        )
-        self.assertEqual(args.scalar, "f32")
-        self.assertEqual(args.memory, 50.0)
-        for obsolete_option in ("--scalar-format", "--t-mem"):
-            with redirect_stderr(StringIO()):
-                with self.assertRaises(SystemExit):
-                    parser.parse_args([obsolete_option, "50"])
+    def test_clone_coalescence_uses_geometry_not_identity(self) -> None:
+        n = self.make()
+        clones = n._coalesce_kernels([Kernel(1.0, (2.0,), 3.0), Kernel(4.0, (2.0,), 3.0)])
+        self.assertEqual(len(clones), 1)
+        self.assertEqual(clones[0].W, 5.0)
+        self.assertEqual(clones[0].C, (2.0,))
+        self.assertEqual(clones[0].V, 3.0)
 
 
-class EdgeCaseRiskTests(unittest.TestCase):
-    def test_numeric_policy_rejects_nonfinite_and_f32_overflow(self) -> None:
-        for scalar_format in ("f32", "f64"):
-            policy = NumericPolicy(scalar_format)
-            for value in (math.nan, math.inf, -math.inf):
-                with self.subTest(scalar_format=scalar_format, value=value):
-                    with self.assertRaises(ValueError):
-                        policy.cast(value)
-        with self.assertRaises(ValueError):
-            NumericPolicy("f32").cast(1.0e39)
+    def test_recognised_center_quotient_ignores_cell_dispersion(self) -> None:
+        n = self.make(eta=0.0)
+        n.layers[0].cells = [Kernel(1.0, (2.0,), 1.0), Kernel(1.0, (2.0,), 4.0)]
+        report = n.step([[2.0]], detailed_report=True)
+        layer = report["layer_reports"][0]
+        self.assertEqual(len(report["readout"]), 1)
+        self.assertEqual(layer["context_center"], [2.0])
+        self.assertEqual(layer["context_variance"], 0.0)
+        self.assertFalse(layer["context_emitted"])
 
-    def test_next_up_is_finite_or_rejected_at_format_maximum(self) -> None:
-        maxima = {
-            "f32": float.fromhex("0x1.fffffep+127"),
-            "f64": float.fromhex("0x1.fffffffffffffp+1023"),
-        }
-        for scalar_format, maximum in maxima.items():
-            with self.subTest(scalar_format=scalar_format):
-                with self.assertRaises(ValueError):
-                    NumericPolicy(scalar_format).next_up(maximum)
+    def test_internal_context_variance_is_seeded_unchanged_in_next_layer(self) -> None:
+        n = self.make(budget=1000)
+        n.layers[0].cells = self.exact_pair_cells()
+        n.step([[1.0], [3.0]])  # creates empty L1
+        n.step([[1.0], [3.0]])  # L1 sees (1,2,1) once
+        self.assertEqual(len(n.layers[1].sigma), 1)
+        seed = n.layers[1].sigma[0]
+        self.assertEqual(seed.C, (2.0,))
+        self.assertEqual(seed.V, 1.0)
+        self.assertAlmostEqual(seed.W, n.beta)
 
-    def test_next_up_treats_signed_zero_as_the_same_boundary(self) -> None:
-        policy = NumericPolicy("f32")
-        positive = policy.next_up(0.0)
-        negative = policy.next_up(-0.0)
-        self.assertEqual(positive, negative)
-        self.assertGreater(positive, 0.0)
-        self.assertEqual(policy.cast(positive), positive)
+    def test_scale_invariance_of_learned_geometry(self) -> None:
+        a = Auxein(dimension=1, memory=10.0, eta=1.0, scalar="f64", budget=100)
+        b = Auxein(dimension=1, memory=10.0, eta=1.0, scalar="f64", budget=100)
+        seq = [[[1.0]], [[3.0]], [[1.0]], [[3.0]], [[1.0], [3.0]]] * 4
+        for presentation in seq:
+            a.step(presentation)
+            b.step([[10.0 * x for x in vector] for vector in presentation])
+        self.assertEqual(len(a.layers), len(b.layers))
+        for la, lb in zip(a.layers, b.layers, strict=True):
+            self.assertEqual(len(la.cells), len(lb.cells))
+            self.assertEqual(len(la.sigma), len(lb.sigma))
+            for ka, kb in zip(la.cells, lb.cells, strict=True):
+                self.assertAlmostEqual(ka.W, kb.W)
+                self.assertEqual(tuple(10.0 * x for x in ka.C), kb.C)
+                self.assertAlmostEqual(100.0 * ka.V, kb.V)
+            for ka, kb in zip(la.sigma, lb.sigma, strict=True):
+                self.assertAlmostEqual(ka.W, kb.W)
+                self.assertEqual(tuple(10.0 * x for x in ka.C), kb.C)
+                self.assertAlmostEqual(100.0 * ka.V, kb.V)
 
-    def test_f32_underflow_is_deterministic_zero(self) -> None:
-        policy = NumericPolicy("f32")
-        self.assertEqual(policy.cast(1.0e-50), 0.0)
-        self.assertEqual(policy.cast(-1.0e-50), 0.0)
+    def test_exact_rotation_invariance(self) -> None:
+        a = Auxein(dimension=2, memory=10.0, eta=1.0, scalar="f64", budget=200)
+        b = Auxein(dimension=2, memory=10.0, eta=1.0, scalar="f64", budget=200)
+        def rot(v: list[float]) -> list[float]:
+            return [-v[1], v[0]]
+        seq = [
+            [[2.0, 0.0]], [[0.0, 3.0]], [[2.0, 0.0]], [[0.0, 3.0]],
+            [[2.0, 0.0], [0.0, 3.0]],
+        ] * 4
+        for presentation in seq:
+            a.step(presentation)
+            b.step([rot(v) for v in presentation])
+        self.assertEqual(len(a.layers), len(b.layers))
+        for la, lb in zip(a.layers, b.layers, strict=True):
+            ga = sorted((rot(list(k.C)), k.V, k.W) for k in la.cells)
+            gb = sorted((list(k.C), k.V, k.W) for k in lb.cells)
+            self.assertEqual(ga, gb)
 
-    def test_memory_law_rejects_nonpositive_or_nonfinite_half_life(self) -> None:
-        for value in (0.0, -1.0, math.nan, math.inf, -math.inf):
-            with self.subTest(value=value):
-                with self.assertRaises(ValueError):
-                    MemoryLaw(value)
+    def test_zero_padding_invariance(self) -> None:
+        a = Auxein(dimension=1, memory=10.0, eta=1.0, scalar="f64", budget=200)
+        b = Auxein(dimension=3, memory=10.0, eta=1.0, scalar="f64", budget=200)
+        seq = [[[1.0]], [[3.0]], [[1.0]], [[3.0]], [[1.0], [3.0]]] * 4
+        for presentation in seq:
+            a.step(presentation)
+            b.step([[v[0], 0.0, 0.0] for v in presentation])
+        self.assertEqual(len(a.layers), len(b.layers))
+        for la, lb in zip(a.layers, b.layers, strict=True):
+            self.assertEqual(len(la.cells), len(lb.cells))
+            for ka, kb in zip(la.cells, lb.cells, strict=True):
+                self.assertEqual(kb.C, (ka.C[0], 0.0, 0.0))
+                self.assertEqual(kb.V, ka.V)
+                self.assertEqual(kb.W, ka.W)
 
-    def test_zero_mass_kernel_requires_exact_zero_moments(self) -> None:
-        with self.assertRaises(InvariantViolation):
-            QuadraticKernel(1, 0.0, [math.ulp(0.0)], 0.0)
-        with self.assertRaises(InvariantViolation):
-            QuadraticKernel(1, 0.0, [0.0], math.ulp(0.0))
-
-    def test_f32_projection_raises_q_to_preserve_quadratic_invariant(self) -> None:
-        network = Auxein.empty(
-            1,
-            memory=10.0,
-            budget_units=budget_for(1, "f32", 1),
-            scalar="f32",
-        )
-        policy = NumericPolicy("f32")
-        kernel = QuadraticKernel.point([1.0], 1.0)
-        kernel.S[0] = policy.next_up(1.0)
-        kernel.Q = 1.0
-        network._quantize_kernel(kernel)
-        required = kernel.S[0] * kernel.S[0] / kernel.W
-        self.assertGreaterEqual(kernel.Q, required)
-        self.assertEqual(kernel.Q, policy.cast(kernel.Q))
-        kernel.validate()
-
-    def test_exact_signed_routing_boundary_splits_neutrally_and_favors_plus(self) -> None:
-        plus = QuadraticKernel.point([1.0], 1.0)
-        minus = QuadraticKernel.point([-1.0], 1.0)
-        decision = route_latent(plus, minus, [0.0], 0.75)
-        self.assertEqual(decision.r_plus, 0.375)
-        self.assertEqual(decision.r_minus, 0.375)
-        self.assertEqual(decision.emission_sign, "+")
-
-    def test_exact_growth_value_tie_favors_vertical_then_lower_layer(self) -> None:
-        proposals = [
-            GrowthProposal(ProposalToken(1, 1), "split", 0, 2.0, 1, 1),
-            GrowthProposal(ProposalToken(2, 1), "vertical_birth", 3, 2.0, 1, 1),
-            GrowthProposal(ProposalToken(3, 1), "split", 1, 2.0, 1, 1),
-        ]
-        chosen = min(proposals, key=Auxein._proposal_priority)
-        self.assertEqual(chosen.kind, "vertical_birth")
-        horizontal = [proposal for proposal in proposals if proposal.kind == "split"]
-        self.assertEqual(min(horizontal, key=Auxein._proposal_priority).layer_index, 0)
-
-    def test_root_birth_is_allowed_at_exact_budget_and_denied_one_unit_below(self) -> None:
-        def prepared() -> tuple[Auxein, int, int]:
-            net = Auxein.empty(
-                1,
-                memory=10.0,
-                budget_units=10**9,
-                scalar="f64",
-            )
-            net._root_bud.inject([0.25], net.chi, net.alpha)
-            net._quantize_state()
-            base = net.maintenance_units()
-            return net, base, net._root_birth_delta()
-
-        exact, base, delta = prepared()
-        exact.budget_units = base + delta
-        exact_report = exact.step([0.25], detailed_report=False)
-        self.assertIn("root_birth", [record.kind for record in exact_report.transformations])
-
-        blocked, base, delta = prepared()
-        blocked.budget_units = base + delta - 1
-        blocked_report = blocked.step([0.25], detailed_report=False)
-        self.assertNotIn("root_birth", [record.kind for record in blocked_report.transformations])
-        self.assertEqual(len(blocked._layers), 0)
-
-    def test_empty_state_below_irreducible_maintenance_is_inexecutable(self) -> None:
-        net = Auxein.empty(
-            1,
-            memory=10.0,
-            budget_units=budget_for(1, "f64", 0),
-        )
-        net.budget_units = net.maintenance_units() - 1
-        with self.assertRaises(InsolventState):
-            net.step([0.0], detailed_report=False)
-
-    def test_consumed_split_proposal_cannot_be_replayed(self) -> None:
-        factory = IdentityFactory(2)
-        cell = split_cell(CellIdentity._from_token(1), 0.0, branch_mean=1.0)
-        layer = Layer(
-            1,
-            0.9,
-            QuadraticKernel(1, 1.0, [0.0], 1.0),
-            [cell],
-            Bud.empty(1, [cell.identity]),
-            1,
-        )
-        proposal = layer.best_split_proposal(0, ScalarFootprintMaintenance())
-        self.assertIsNotNone(proposal)
-        layer.execute_split(proposal, layer.geometry.radius, factory)
-        with self.assertRaises(InvalidStateOperation):
-            layer.execute_split(proposal, layer.geometry.radius, factory)
-
-    def test_serialization_rejects_active_proposal_arbitration(self) -> None:
-        net = Auxein.from_seed(
-            [0.0], memory=10.0, budget_units=budget_for(1, "f64", 10)
-        )
-        net._layers[0].cells[0] = split_cell(
-            net._layers[0].cells[0].identity, 0.0, branch_mean=1.0
-        )
-        proposal = net._layers[0].best_split_proposal(0, net.maintenance_model)
-        self.assertIsNotNone(proposal)
-        with self.assertRaises(InvalidStateOperation):
-            net.to_state_dict()
-
-    def test_serialization_rejects_nonfinite_geometry(self) -> None:
-        net = Auxein.empty(
-            1, memory=10.0, budget_units=budget_for(1, "f64", 1)
-        )
-        state = net.to_state_dict()
-        state["root_bud"]["W"] = math.nan
-        with self.assertRaises(ValueError):
-            Auxein.from_state_dict(state, budget_units=net.budget_units)
-
-    def test_serialization_rejects_fractional_and_boolean_counters(self) -> None:
-        net = Auxein.empty(
-            1, memory=10.0, budget_units=budget_for(1, "f64", 1)
-        )
-        for field, value in (("step_index", 0.5), ("next_identity", True)):
-            state = net.to_state_dict()
-            state[field] = value
-            with self.subTest(field=field):
-                with self.assertRaises(ValueError):
-                    Auxein.from_state_dict(state, budget_units=net.budget_units)
-
-    def test_serialization_rejects_silent_f32_conversion(self) -> None:
-        net = Auxein.empty(
-            1,
-            memory=10.0,
-            budget_units=budget_for(1, "f32", 1),
-            scalar="f32",
-        )
-        state = net.to_state_dict()
-        state["root_bud"] = {"W": 1.0, "S": [0.1], "Q": 1.0}
-        with self.assertRaises(ValueError):
-            Auxein.from_state_dict(state, budget_units=net.budget_units)
-
-    def test_serialization_rejects_noncanonical_quadratic_projection(self) -> None:
-        net = Auxein.empty(
-            1, memory=10.0, budget_units=budget_for(1, "f64", 1)
-        )
-        state = net.to_state_dict()
-        state["root_bud"] = {
-            "W": 1.0,
-            "S": [1.0],
-            "Q": math.nextafter(1.0, 0.0),
-        }
-        with self.assertRaises(ValueError):
-            Auxein.from_state_dict(state, budget_units=net.budget_units)
-
-    def test_quadratic_overflow_is_atomic_at_kernel_and_step_boundaries(self) -> None:
-        maximum = float.fromhex("0x1.fffffffffffffp+1023")
-        kernel = QuadraticKernel.point([1.0], 1.0)
-        kernel_before = (kernel.W, list(kernel.S), kernel.Q)
-        with self.assertRaises(InvariantViolation):
-            kernel.update([maximum], 1.0, 0.5)
-        self.assertEqual((kernel.W, list(kernel.S), kernel.Q), kernel_before)
-
-        net = Auxein.empty(
-            1, memory=10.0, budget_units=budget_for(1, "f64", 1)
-        )
-        state_before = copy.deepcopy(net.to_state_dict())
-        with self.assertRaises(ValueError):
-            net.step([maximum], detailed_report=False)
-        self.assertEqual(net.to_state_dict(), state_before)
-        self.assertEqual(net.step_index, 0)
-
-    def test_new_topology_does_not_emit_or_request_during_its_birth_step(self) -> None:
-        root_net = Auxein.empty(
-            1, memory=10.0, budget_units=budget_for(1, "f64", 4)
-        )
-        root_report = root_net.step([0.25])
-        self.assertIn("root_birth", [record.kind for record in root_report.transformations])
-        self.assertEqual(root_report.layer_reports, ())
-        self.assertEqual(root_net._terminal.bud.parent.W, 0.0)
-        self.assertFalse(root_net._terminal._pending)
-
-        vertical_net = Auxein.from_seed(
-            [0.0], memory=10.0, budget_units=budget_for(1, "f64", 100)
-        )
-        root = vertical_net._terminal
-        identities = [root.cells[0].identity, vertical_net._identity_factory.new()]
-        root.cells.append(neutral_cell(identities[1], 2.0))
-        root.bud = Bud.empty(1, identities)
-        root.bud.plus = QuadraticKernel.point([1.0], 2.0)
-        root.bud.minus = QuadraticKernel.point([-1.0], 2.0)
-        root.bud.owners = {
-            identities[0]: OwnerMoments(1, 1.0, [1.0], 1.0, [-1.0]),
-            identities[1]: OwnerMoments(1, 1.0, [1.0], 1.0, [-1.0]),
-        }
-        vertical_net.validate()
-
-        old_layer_count = len(vertical_net._layers)
-        vertical_report = vertical_net.step([0.0])
-        self.assertIn(
-            "vertical_birth", [record.kind for record in vertical_report.transformations]
-        )
-        self.assertEqual(len(vertical_report.layer_reports), old_layer_count)
-        self.assertEqual(vertical_net._terminal.bud.parent.W, 0.0)
-        self.assertTrue(
-            all(cell.split_gain == 0.0 for cell in vertical_net._terminal.cells)
-        )
-        self.assertTrue(all(not layer._pending for layer in vertical_net._layers))
-
-    def test_f32_positive_branch_underflow_closes_canonically(self) -> None:
-        policy = NumericPolicy("f32")
-        minimum_subnormal = policy.next_up(0.0)
-        net = Auxein.from_seed(
-            [0.0],
-            memory=10.0,
-            budget_units=budget_for(1, "f32", 4),
-            scalar="f32",
-        )
-        bud = net._terminal.bud
-        self.assertIsNotNone(bud)
-        owner = next(iter(bud.owners.values()))
-        below_half_ulp = minimum_subnormal / 2.0
-        owner.lambda_plus = below_half_ulp
-        bud.plus = QuadraticKernel(1, below_half_ulp, [0.0], 0.0)
-
-        net._quantize_state()
-        self.assertEqual(owner.lambda_plus, 0.0)
-        self.assertEqual(bud.plus.W, 0.0)
-        self.assertSequenceEqual(list(bud.plus.S), [0.0])
-        self.assertEqual(bud.plus.Q, 0.0)
-        net.validate()
-
-        survivor = QuadraticKernel(1, minimum_subnormal, [0.0], 0.0)
-        net._quantize_kernel(survivor)
-        self.assertEqual(survivor.W, minimum_subnormal)
-
-    def test_serialization_rejects_duplicate_live_identities_and_stale_factory(self) -> None:
-        net = Auxein.from_seed(
-            [0.0], memory=10.0, budget_units=budget_for(1, "f64", 8)
-        )
-
-        duplicated = net.to_state_dict()
-        first = copy.deepcopy(duplicated["layers"][0])
-        second = copy.deepcopy(first)
-        first["bud"] = None
-        second["owner_serial"] = 2
-        duplicated["layers"] = [first, second]
-        duplicated["next_layer_serial"] = 3
-        with self.assertRaises(InvariantViolation):
-            Auxein.from_state_dict(duplicated, budget_units=net.budget_units)
-
-        stale = net.to_state_dict()
-        stale["next_identity"] = stale["layers"][0]["cells"][0]["identity"]
-        with self.assertRaises(InvariantViolation):
-            Auxein.from_state_dict(stale, budget_units=net.budget_units)
-
-    def test_step_rejects_nonfinite_or_wrong_dimension_input(self) -> None:
-        net = Auxein.empty(
-            1, memory=10.0, budget_units=budget_for(1, "f64", 1)
-        )
-        state_before = copy.deepcopy(net.to_state_dict())
-        for value in ([math.nan], [math.inf], [0.0, 1.0]):
-            with self.subTest(value=value):
-                with self.assertRaises(ValueError):
-                    net.step(value, detailed_report=False)
-                self.assertEqual(net.to_state_dict(), state_before)
-
-
-
-class PublicApiValidationTests(unittest.TestCase):
-    def test_direct_constructor_is_closed(self) -> None:
-        with self.assertRaisesRegex(TypeError, "Auxein.empty"):
-            Auxein()
-
-    def test_public_parameters_are_not_silently_coerced(self) -> None:
-        invalid_calls = (
-            lambda: Auxein.empty(2.7, memory=10.0, budget=1),
-            lambda: Auxein.empty(True, memory=10.0, budget=1),
-            lambda: Auxein.empty(2, memory=True, budget=1),
-            lambda: Auxein.empty(2, memory="10", budget=1),
-            lambda: Auxein.empty(2, memory=10.0, budget=1, check_invariants="no"),
-            lambda: Auxein.from_seed([0.0], memory=10.0, budget=1, seed_weight=True),
-            lambda: Auxein.from_seed([0.0], memory=10.0, budget=1, seed_weight="1"),
-        )
-        for call in invalid_calls:
-            with self.subTest(call=call):
-                with self.assertRaises(TypeError):
-                    call()
-
-    def test_scalar_footprint_integer_width_is_strict(self) -> None:
-        for value in (True, 8.0, "8"):
-            with self.subTest(value=value):
-                with self.assertRaises(TypeError):
-                    ScalarFootprintMaintenance(value)
-        with self.assertRaises(ValueError):
-            ScalarFootprintMaintenance(0)
-
-    def test_maintenance_model_surface_is_validated(self) -> None:
-        with self.assertRaisesRegex(TypeError, "maintenance_model"):
-            Auxein.empty(1, memory=10.0, budget=1, maintenance_model=object())
-
-    def test_causal_configuration_is_read_only(self) -> None:
-        network = Auxein.empty(2, memory=10.0, budget=2)
-        for name, value in (
-            ("dimension", 3),
-            ("memory", 20.0),
-            ("scalar", "f32"),
-            ("chi", 1.0),
-            ("alpha", 0.0),
-            ("step_index", 4),
-            ("maintenance_model", ScalarFootprintMaintenance()),
-            ("check_invariants", False),
-            ("layers", []),
-            ("root_bud", None),
-            ("identity_factory", None),
-            ("terminal", None),
-        ):
-            with self.subTest(name=name):
-                with self.assertRaises(AttributeError):
-                    setattr(network, name, value)
-        network.budget = 3
-        network.budget_units = network.budget_units
-        network.eta = 0.5
-        self.assertEqual(network.eta, 0.5)
-
-    def test_identity_is_opaque_and_transform_kinds_are_closed(self) -> None:
-        with self.assertRaisesRegex(TypeError, "created by Auxein"):
-            CellIdentity(1)
-        network = Auxein.from_seed([0.0], memory=10.0, budget=2)
-        report = network.step([0.0])
-        winner = report.layer_reports[0].winner
-        self.assertIsNotNone(winner)
-        self.assertEqual(repr(winner), "CellIdentity()")
-        with self.assertRaises(ValueError):
-            auxein_module.TransformationRecord("unknown", 0, 0.0, 0)
-
-    def test_summary_and_version_names_are_unambiguous(self) -> None:
-        network = Auxein.empty(1, memory=10.0, budget=1)
-        summary = network.summary()
-        self.assertIn("steps_seen", summary)
-        self.assertIn("layer_count", summary)
-        self.assertNotIn("step", summary)
-        self.assertNotIn("layers", summary)
-        self.assertEqual(auxein_module.__version__, auxein_module.MODEL_VERSION)
-
+    def test_external_input_is_strictly_vectors(self) -> None:
+        n = self.make()
+        with self.assertRaises((TypeError, ValueError)):
+            n.step([2.0])
+        with self.assertRaises((TypeError, ValueError)):
+            n.step([([2.0], 1.0)])
+        with self.assertRaises((TypeError, ValueError)):
+            n.step([])
 
 
 if __name__ == "__main__":
-    unittest.main(verbosity=1)
+    unittest.main(verbosity=2)

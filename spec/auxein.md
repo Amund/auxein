@@ -1,1930 +1,1180 @@
-# Auxein, « croître » en grec
+# AUXEIN v0.2.0 — Canon mathématique et matériel
 
-Modèle de quantification vectoriel autorégulé, piloté par les données. Le moteur gère lui-même sa topologie, sa croissance horizontale et verticale, et la représentation de ses entrées, sans seuils fixes ni paramètres externes. Tout est proportionnel à la déviation de l’état interne.
-
-- **géométrie de l’entrée comme matière première**
-- **absence de seuils arbitraires** : les transformations reposent sur des gains géométriques exacts
-- **état auto-référentiel** : rayons, reconnaissances, valeurs et distinctions sont dérivés du système lui-même
-- **topologie autonome** : morts et naissances de cellules et de couches appartiennent au moteur
-- **flux continu** : aucune époque, aucun lot, aucune séparation entraînement/inférence
-
-**Auxein n'a pas d'objectif**, mais des capacités. C’est une machine à abstraction, une machine de croissance alimentée par un flux, dont les seules raisons doivent émerger de sa géométrie interne et de ses ressources.
-
-La meilleure définition de son usage serait : construire et entretenir une représentation hiérarchique en ligne à partir des régularités récurrentes d’un flux. Quelques usages possibles :
-
-- compression structurelle adaptative : remplacer beaucoup d’observations par quelques identités, puis quelques relations communes entre ces identités
-- détection de régimes et de transitions : servir de mémoire structurée d’un système non stationnaire
-- découverte de motifs transférables
-- en amont d'un système de classification, de prédiction, de contrôle ou d'explication, pour simplifier ou fluidifier sa tâche
-
-Quelques notions vérifiées empiriquement :
-
-- l’abstraction provient de la partie reconnue qui n’est pas absorbée par l’identité locale
-- ce qui devient abstrait dépend de ce que l’étage inférieur choisit d’absorber
-- la profondeur factorise une relation commune entre représentations locales différentes
-- la récursion fonctionnelle profonde existe
-
-## 1. Constitution
-
-- **la géométrie pousse, l'économie autorise**
-- l'économie n'est pas basée sur la géométrie ; la géométrie **est** l'économie
-
-Le principe de croissance et d’arbitrage est :
-
-- les croissances horizontale et verticale sont **économiquement équivalentes** ; seule la géométrie décide de l'orientation
-- La géométrie est l’échelle commune de valeur des transformations.
-- La maintenance est l’échelle de solvabilité.
-- Aucune conversion par ratio ou coefficient n’est introduite entre ces deux grandeurs.
-
-La constitution hiérarchique est :
-
-- une cellule ne connaît que son propre état
-- une couche connaît son état et ses cellules
-- le réseau connaît son état, son bourgeon racine et ses couches
-
-La fondation économique est :
-
-- la géométrie du moteur est complète sans économie ; sans économie, Auxein peut croître sans borne
-- l'économie est le frein nécessaire au fonctionnement en espace et ressources finis
-- il n'y a pas d'épargne, pas de spéculation ; le budget global est neuf à chaque tour
-- la mort est une perte sèche ; elle réduit seulement la maintenance future
-
-## 2. Horloge statistique commune
-
-La fondation géométrique expose :
+**Version : 0.2.0**  
+**Statut : canon mathématique et matériel**
 
 \[
-D\in\mathbb N^*,
-\qquad
-0<T_{mem}<\infty.
+\boxed{\text{la géométrie pousse ; l'économie autorise}}
 \]
 
-La réalisation numérique de référence expose en outre un format persistant :
+## 0. Contrat
+
+Auxein est un réseau ordonné de `LAYER` autonomes. Chaque `LAYER` applique exactement la même transformation :
+
+```text
+présentation
+→ concernement par les CELL
+→ partage de masse
+→ apprentissage local des CELL
+→ inconnu vers Σ
+→ contexte unique des reconnaissances
+→ présentation de la LAYER suivante
+```
+
+Une `CELL` représente une connaissance directionnelle acquise. Elle se déclare concernée uniquement par sa propre géométrie. Plusieurs `CELL` peuvent se déclarer concernées simultanément.
+
+Ce qu'aucune `CELL` ne reconnaît reste local à la `LAYER`, alimente une mémoire privée `Σ`, et peut devenir une nouvelle `CELL` lorsqu'il est récurrent.
+
+Ce qui traverse une frontière de couche n'est pas une erreur, une provenance ni une branche par `CELL`. Une `LAYER` compresse toutes les valeurs qu'elle a effectivement reconnues pendant la présentation en **un unique noyau de contexte**. Ce noyau devient, lorsqu'il possède une diversité et une direction non nulles, l'unique présentation de la `LAYER` suivante.
+
+Une présentation extérieure est une observation logique simultanée. Une présentation multi-vecteur affirme donc que ses vecteurs appartiennent au même contexte causal ; la découper en plusieurs appels successifs constitue plusieurs présentations différentes.
+
+Principes normatifs :
+
+1. aucune tâche externe, cible, classe, label ou loss supervisée ;
+2. aucune `LAYER` ne lit l'état privé d'une autre ;
+3. le seul contrat cognitif inter-couches est une présentation finie positive de noyaux centrés ;
+4. toutes les `LAYER` appliquent exactement la même loi ;
+5. aucun WTA, `top-k`, choix cognitif par identité ou ordre d'itération ;
+6. plusieurs `CELL` peuvent être concernées simultanément par le même atome ;
+7. ce qui est inconnu apprend horizontalement dans la `LAYER` courante ;
+8. seules les connaissances effectivement reconnues participent au contexte vertical ;
+9. une couche émet au plus un noyau de contexte par présentation ;
+10. aucune responsabilité d'apprentissage, masse interne de `CELL`, identité ou provenance ne pondère la géométrie du contexte vertical ;
+11. aucun seuil numérique arbitraire ni epsilon comportemental ;
+12. aucune autorité cognitive de l'âge, d'une provenance ou d'une identité administrative ;
+13. une présentation est causalement atomique ;
+14. l'ordre des atomes d'une présentation n'a aucune autorité ;
+15. un objet créé pendant un pas ne lit ni n'émet pour ce pas ;
+16. la géométrie cognitive est définie indépendamment du budget ;
+17. toute quantité exactement reconstructible peut rester éphémère ;
+18. l'origine `0` n'est pas une connaissance : elle représente l'absence de direction cognitive canonique ;
+19. une relation exactement symétrique de centre nul reste silencieuse plutôt que de recevoir un axe arbitraire ;
+20. aucune matrice, covariance persistante, axe privilégié ou géométrie de second ordre n'appartient à Auxein.
+
+---
+
+## 1. Présentations et horloge
+
+### 1.1 Présentation extérieure
+
+Soit `D∈N*`. Une présentation extérieure est une liste finie non vide de vecteurs :
 
 \[
-\boxed{p\in\{\mathrm{f32},\mathrm{f64}\}.}
+\boxed{
+\mathcal X=(x_1,\dots,x_n),
+\qquad n>0,
+\qquad x_s\in\mathbb R^D.
+}
 \]
 
-Ce format n’est ni une preuve géométrique, ni une horloge, ni un seuil. Il fixe la résolution des réels persistants et leur empreinte dans le modèle de maintenance de référence.
-
-La rétention statistique universelle est :
+Son ordre n'a aucune autorité. `NETWORK` lui associe à l'entrée de `L0` la présentation uniforme :
 
 \[
-\boxed{\chi=2^{-1/T_{mem}}}
+\boxed{
+\mathcal P_0=
+\left\{\left(\frac1n,x_s,0\right)\right\}_{s=1}^{n}.
+}
+\]
+
+La masse totale extérieure vaut donc exactement `1`.
+
+### 1.2 Atome interne
+
+Toute présentation reçue par une `LAYER` est une famille finie positive de noyaux-atome :
+
+\[
+\boxed{
+\mathcal P=
+\{X_s=(r_s,c_s,v_s)\}_{s\in S},
+}
 \]
 
 avec :
 
 \[
-\chi^{T_{mem}}=\frac12.
-\]
-
-Pour l’exécution numérique, poser aussi :
-
-\[
 \boxed{
-\alpha
-=
-1-\chi
-=
--\operatorname{expm1}\!\left(-\frac{\ln 2}{T_{mem}}\right).
+r_s>0,
+\qquad c_s\in\mathbb R^D,
+\qquad v_s\ge0,
+\qquad 0<\sum_s r_s\le1.
 }
 \]
 
-Cette écriture évite l’annulation de \(1-\chi\) pour les grandes demi-vies.
+Interprétation :
 
-Le moteur expose en outre un multiplicateur d’apprentissage :
+- `r_s` : masse causale de l'atome ;
+- `c_s` : centre vectoriel présenté ;
+- `v_s` : dispersion scalaire interne autour de ce centre.
 
-\[
-\boxed{\eta\in[0,1],\qquad \alpha_\eta=\eta\alpha.}
-\]
+Une entrée extérieure `x` est donc exactement le cas dégénéré `(r,x,0)`.
 
-Toutes les mises à jour statistiques sont évaluées sous la forme stable :
-
-\[
-\boxed{X\leftarrow X+\alpha_\eta(X_{cible}-X).}
-\]
-
-À \(\eta=1\), on retrouve exactement l’EMA canonique définie par \(T_{mem}\). Réduire \(\eta\) ralentit conjointement l’injection et l’oubli sans modifier la demi-vie déclarée ; à \(\eta=0\), aucune mémoire n’est modifiée. Toutes les mémoires EMA utilisent le même \(\alpha_\eta\), sauf si une nécessité distincte est démontrée.
-
-L'horizon intrinsèque dérivé reste :
-
-\[
-\Theta_{mem}=\frac1{1-\chi}=\frac1\alpha.
-\]
-
-Pour \(\eta>0\), l’horizon effectif d’exécution vaut \(1/\alpha_\eta\) ; pour \(\eta=0\), il est infini. Aucun de ces horizons ne possède de signification économique automatique et aucun ne multiplie un coût topologique.
-
-## 3. Noyau quadratique universel
-
-Pour une pertinence \(r\ge0\) et un vecteur \(x\in\mathbb R^D\), un noyau :
-
-\[
-H=(W,S,Q)
-\]
-
-suit :
-
-\[
-\boxed{W\leftarrow W+\alpha_\eta(r-W)}
-\]
-
-\[
-\boxed{S\leftarrow S+\alpha_\eta(rx-S)}
-\]
-
-\[
-\boxed{Q\leftarrow Q+\alpha_\eta(r\|x\|^2-Q).}
-\]
-
-L'invariant est :
-
-\[
-\boxed{WQ\ge\|S\|^2.}
-\]
-
-Pour \(W>0\) :
-
-\[
-\mu=\frac SW,
-\]
-
-\[
-P_{move}=\frac{\|S\|^2}{W},
-\qquad
-P_{struct}=Q-\frac{\|S\|^2}{W}\ge0,
-\]
-
-et :
-
-\[
-Q=P_{move}+P_{struct}.
-\]
-
-### 3.1. Recentrage exact
-
-Après déplacement normalisé \(\Delta\) du centre du noyau :
-
-\[
-S'=S-W\Delta,
-\]
-
-\[
-Q'=Q-2\Delta\cdot S+W\|\Delta\|^2.
-\]
-
-Alors :
-
-\[
-\boxed{P'_{struct}=P_{struct}.}
-\]
-
-### 3.2. Oubli sans injection
-
-Pour \(r=0\) :
-
-\[
-W'=(1-\alpha_\eta)W,
-\qquad
-S'=(1-\alpha_\eta)S,
-\qquad
-Q'=(1-\alpha_\eta)Q.
-\]
-
-
-### 3.3. Projection dans le format persistant
-
-Les expressions intermédiaires de la référence Python sont évaluées en `float` binary64. À chaque frontière causale de mutation, tout réel destiné à persister est projeté dans le format choisi \(p\).
-
-\[
-\boxed{
-\operatorname{persist}_p(x)
-=
-\text{arrondi IEEE-754 de }x\text{ vers }p.
-}
-\]
-
-La projection s’applique uniformément à tous les réels persistants : masses, premiers moments, seconds moments, centres, formes propriétaires et masses de concordance. Elle ne s’applique pas sélectivement aux seuls « poids ».
-
-Cette convention rend les trajectoires `f32` et `f64` déterministes et réellement distinctes, sans prétendre émuler chaque instruction d’un processeur matériel binary32.
-
-Les fermetures numériques de l’invariant \(WQ\ge\|S\|^2\) et les égalités de géométrie dégénérée sont dérivées de la résolution du format choisi. Elles ne constituent jamais un epsilon sémantique ni un seuil de transformation.
-
-## 4. Géométrie propre d'une couche
-
-Une couche reçoit uniformément :
-
-\[
-(I,r_{in}),
-\qquad
-r_{in}\ge0.
-\]
-
-Aucune couche ne possède de règle d’entrée, d’amorçage, de survie ou de mort particulière. Le réseau construit le couple reçu par la première couche existante.
-
-Chaque couche entretient :
-
-\[
-H_R=(W_R,S_R,Q_R)
-\]
-
-sur son flux reçu.
-
-Pour \(W_R>0\) :
-
-\[
-M_R=\frac{S_R}{W_R},
-\]
-
-\[
-\boxed{
-R_{geo}^2
-=
-\frac{Q_R}{W_R}-\|M_R\|^2.
-}
-\]
-
-\(R_{geo}\) est l'unité géométrique interne dérivée du flux. Elle ne dépend ni du nombre de Cellules ni de leur compétition.
-
-### 4.1. Convention dégénérée
-
-Pour une distance physique \(d\), si \(R_{geo}>0\) :
-
-\[
-d_{norm}=\frac d{R_{geo}}.
-\]
-
-Si \(R_{geo}=0\) :
-
-\[
-\boxed{
-d_{norm}
-=
-\begin{cases}
-0,&d=0,\\
-+\infty,&d>0.
-\end{cases}
-}
-\]
-
-Aucun \(\varepsilon\) comportemental n'est introduit.
-
-### 4.2. Interface racine du réseau
-
-Le réseau possède en permanence un bourgeon racine :
-
-\[
-\boxed{B_{\varnothing}=(W_{\varnothing},S_{\varnothing},Q_{\varnothing}).}
-\]
-
-Ce bourgeon :
-
-- n’est pas une couche ;
-- ne possède aucune Cellule ni identité source ;
-- n’effectue aucune concordance inter-identitaire ;
-- utilise le noyau quadratique universel ;
-- constitue l’organe minimal par lequel le réseau peut recommencer à construire une hiérarchie.
-
-L’ensemble des couches est :
-
-\[
-\boxed{\mathcal L=\varnothing}
-\qquad\text{ou}\qquad
-\boxed{\mathcal L=\{0,1,\ldots,L_{max}\}.}
-\]
-
-Si \(\mathcal L=\varnothing\), l’entrée extérieure \(x\) est présentée au bourgeon racine avec \(r=1\). Si des couches existent, le réseau présente :
-
-\[
-\boxed{(I_0,r_{in,0})=(x,1)}
-\]
-
-à la couche \(0\). Cette convention appartient au réseau ; elle ne modifie aucune loi interne de la couche.
-
-#### 4.2.1. Incarnation de la première couche
-
-Lorsque :
-
-\[
-\mathcal L=\varnothing,
-\qquad
-W_{\varnothing}>0,
-\]
-
-et que l’économie autorise l’empreinte persistante résultante, le réseau matérialise une couche \(0\) avec une seule Cellule fondatrice.
+Les atomes de géométrie exactement identique `(c,v)` sont coalescés par somme de masse avant tout calcul. Leur ordre et leur découpage artificiel n'ont aucune autorité.
 
 Poser :
 
 \[
-C_0=\frac{S_{\varnothing}}{W_{\varnothing}},
+\boxed{|\mathcal P|:=\sum_s r_s.}
 \]
 
+Une présentation est une unité de contexte causal, pas un batch d'exécution. Regrouper ou séparer deux observations non simultanées appartient à l'application hôte et peut modifier la cognition.
+
+### 1.3 Horloge commune
+
+Soient :
+
 \[
-A_0=W_{\varnothing},
+0<T_{mem}<\infty,
 \qquad
-E_0=0,
-\qquad
-G_0=Q_{\varnothing}-\frac{\|S_{\varnothing}\|^2}{W_{\varnothing}}.
+\eta\in[0,1].
 \]
-
-La Cellule reçoit une identité neuve et un split latent neutre :
-
-\[
-\boxed{H_0^+=H_0^-=\frac12(A_0,0,G_0).}
-\]
-
-La géométrie propre de la nouvelle couche est une copie du noyau racine accumulé. Le bourgeon racine est ensuite consommé et remis à zéro. La présentation ayant causé cette naissance n’est pas rejouée dans la couche créée, qui ne produit aucune demande avant la présentation suivante.
-
-Cette incarnation ne participe à aucun marché de valeur géométrique : lorsqu’aucune couche n’existe, aucune transformation concurrente n’existe. Elle est exécutée dès que sa masse est positive et que l’économie ne lui oppose pas son veto.
-
-#### 4.2.2. Warmup sans topologie
-
-Tant que la naissance n’est pas soutenable, le bourgeon racine continue d’accumuler la géométrie extérieure sous le même \(\alpha_\eta\). Ce warmup est dépourvu de couches et de Cellules, mais il n’est pas dépourvu d’empreinte persistante :
-
-\[
-\boxed{M_{min}=M_{network}+M_{B_{\varnothing}}.}
-\]
-
-Si \(B_{units}<M_{min}\), Auxein est inexécutable.
-
-## 5. Identité cellulaire
-
-Chaque Cellule possède une identité opaque et persistante :
-
-\[
-\boxed{\iota_i.}
-\]
-
-L'identité permet seulement :
-
-- de tester l'égalité de deux références ;
-- de retrouver une mémoire attachée à une Cellule ;
-- de suivre une source malgré la dérive de son prototype ;
-- de déclarer une naissance lors d'une mitose.
-
-Elle ne possède aucune géométrie. Sont interdites :
-
-\[
-\iota_i-\iota_j,
-\qquad
-\|\iota_i-\iota_j\|,
-\qquad
-\frac{\iota_i+\iota_j}{2}.
-\]
-
-Une permutation bijective des identités ne modifie aucun comportement géométrique.
-
-L'identité garantit la continuité biographique, pas l'immuabilité sémantique.
-
----
-
-## 6. Reconnaissance absolue et écriture exclusive
-
-Pour une Cellule \(i\) de prototype courant \(C_i\), si \(R_{geo}>0\) :
-
-\[
-\boxed{e_i=\frac{I-C_i}{R_{geo}}.}
-\]
-
-La reconnaissance absolue est :
-
-\[
-\boxed{a_i=e^{-\|e_i\|^2}.}
-\]
-
-Si \(R_{geo}=0\), appliquer la convention de la section 4.1 : reconnaissance \(1\) en cas d'égalité exacte, \(0\) sinon.
-
-Chaque \(a_i\) est strictement local : aucune autre Cellule n'intervient dans sa valeur.
-
-### 6.1. Sélection unique
-
-S'il existe une Cellule avec \(a_i>0\), l'indice actif est :
-
-\[
-\boxed{k\in\operatorname*{argmax}_i a_i}
-\]
-
-avec un ordre déterministe immuable en cas d'égalité mathématique exacte.
-
-Cet ordre ferme les états dégénérés ; il n'a aucune signification géométrique ou économique.
-
-### 6.2. Pertinence d'écriture
-
-\[
-\boxed{
-r_i^{learn}
-=
-\begin{cases}
-r_{in}a_i,&i=k,\\
-0,&i\ne k.
-\end{cases}
-}
-\]
-
-Lorsqu'un gagnant existe :
-
-\[
-\sum_i r_i^{learn}=r_{in}a_k\le r_{in}.
-\]
-
-La masse non écrite :
-
-\[
-r_{void}=r_{in}(1-a_k)
-\]
-
-reste diagnostique. Elle n'est ni redistribuée ni transmise comme résidu.
-
-La sélection décide **qui écrit** ; la reconnaissance décide **avec quelle autorité**.
-
-## 7. Mémoire locale, bifurcation latente et mouvement
-
-Une Cellule entretient deux noyaux quadratiques ordonnés :
-
-\[
-H_i^+=(A_i^+,E_i^+,G_i^+),
-\qquad
-H_i^-=(A_i^-,E_i^-,G_i^-).
-\]
-
-Le noyau parent est dérivé par somme :
-
-\[
-A_i=A_i^++A_i^-,
-\qquad
-E_i=E_i^++E_i^-,
-\qquad
-G_i=G_i^++G_i^-.
-\]
-
-Les symboles \(+\) et \(-\) sont des conventions historiques persistantes. Les histoires ne sont jamais permutées après coup.
-
-Un split neutre d'un noyau \((A,E,G)\) est :
-
-\[
-\boxed{
-A^+=A^-=\frac A2,
-\quad
-E^+=E^-=\frac E2,
-\quad
-G^+=G^-=\frac G2.
-}
-\]
-
-Il porte un gain de séparation nul.
-
-### 7.1. Routage interne de la preuve
-
-Toutes les quantités de routage sont lues avant l'injection courante.
-
-Pour \(A>0\) :
-
-\[
-\mu=\frac EA.
-\]
-
-Lorsque les deux masses sont positives :
-
-\[
-\mu_+=\frac{E^+}{A^+},
-\qquad
-\mu_-=\frac{E^-}{A^-},
-\qquad
-b=\mu_+-\mu_-.
-\]
-
-Poser :
-
-\[
-s=e_k-\mu.
-\]
-
-La Cellule reste l'unique propriétaire externe :
-
-\[
-\boxed{r^++r^-=r_k^{learn}.}
-\]
-
-Conventions :
-
-- si \(r_k^{learn}=0\), alors \(r^+=r^-=0\) ;
-- si le noyau est vide, la première preuve est répartie neutralement ;
-- si \(b=0\) et \(s\ne0\), la première preuve structurelle non nulle amorce la branche \(+\) ;
-- si \(b=0\) et \(s=0\), la preuve est partagée également ;
-- si \(b\ne0\) :
-
-\[
-\boxed{
-(r^+,r^-)
-=
-\begin{cases}
-(r_k^{learn},0),&b\cdot s>0,\\
-(0,r_k^{learn}),&b\cdot s<0,\\
-(r_k^{learn}/2,r_k^{learn}/2),&b\cdot s=0.
-\end{cases}
-}
-\]
-
-Chaque branche suit ensuite le noyau universel avec \((e_k,r^\pm)\). Par sommation, le parent suit exactement \((e_k,r_k^{learn})\).
-
-### 7.2. Déplacement
-
-Après injection, pour \(A_i>0\) :
-
-\[
-\boxed{h_i=\frac{E_i}{A_i}.}
-\]
-
-Pour \(A_i=0\) :
-
-\[
-h_i=0.
-\]
-
-Le prototype se déplace :
-
-\[
-\boxed{C_i'=C_i+R_{geo}h_i.}
-\]
-
-Les deux histoires sont recentrées par le même \(h_i\). Le parent vérifie alors :
-
-\[
-E_i'=0,
-\]
-
-\[
-G_i'=G_i-\frac{\|E_i\|^2}{A_i}=P_{struct,i}.
-\]
-
-L'axe latent est invariant au déplacement commun :
-
-\[
-(\mu_+'-\mu_-')=(\mu_+-\mu_-).
-\]
-
-Aucun coefficient de vitesse indépendant n'est introduit ; l'inertie provient de l'EMA.
-
----
-
-## 8. Croissance horizontale
-
-### 8.1. Gain exact de séparation
-
-Pour les deux branches de masse positive :
-
-\[
-P_\pm=G^\pm-\frac{\|E^\pm\|^2}{A^\pm}.
-\]
-
-Le gain exact de matérialisation de la bifurcation est :
-
-\[
-\boxed{J_{split}=P_{struct}-(P_++P_-)}
-\]
-
-et :
-
-\[
-\boxed{
-J_{split}
-=
-\frac{A^+A^-}{A}\|\mu_+-\mu_-\|^2
-\ge0.
-}
-\]
-
-La Cellule produit une **demande géométrique de mitose** si et seulement si :
-
-\[
-\boxed{J_{split}>0.}
-\]
-
-Cette demande n'implique aucune exécution sans autorisation économique.
-
-### 8.2. Matérialisation
 
 Définir :
 
 \[
-\mu=\frac EA,
+\chi=2^{-1/T_{mem}},
 \qquad
-\delta_+=\mu_+-\mu,
+\alpha=1-\chi,
 \qquad
-\delta_-=\mu_--\mu.
-\]
-
-Alors :
-
-\[
-A^+\delta_+ + A^-\delta_-=0.
-\]
-
-Les deux prototypes matérialisés sont :
-
-\[
-\boxed{C_+=C+R_{geo}\delta_+}
-\]
-
-\[
-\boxed{C_-=C+R_{geo}\delta_-.}
-\]
-
-Chaque branche devient le noyau parent de sa Cellule, recentré autour du nouveau prototype :
-
-\[
-A_{child,\pm}=A^\pm,
-\]
-
-\[
-E_{child,\pm}=E^\pm-A^\pm\delta_\pm=0,
-\]
-
-\[
-G_{child,\pm}
-=
-G^\pm-2\delta_\pm\cdot E^\pm+A^\pm\|\delta_\pm\|^2
-=
-P_\pm.
-\]
-
-La mitose conserve la masse et réduit la puissance structurelle totale de :
-
-\[
-\boxed{J_{split}.}
-\]
-
-### 8.3. Mère et fille
-
-La branche \(+\) est, par convention constitutionnelle, la continuation de la mère :
-
-\[
-\boxed{\iota_+=\iota_{mother}.}
-\]
-
-La branche \(-\) reçoit une identité neuve :
-
-\[
-\boxed{\iota_-=\operatorname{newIdentity}().}
-\]
-
-Cette asymétrie est exclusivement identitaire. Elle n'intervient dans aucune distance ni aucun gain.
-
-Les deux Cellules initialisent leur prochaine bifurcation par un split neutre de leur noyau hérité. Ainsi :
-
-\[
-\boxed{J_{split,+}=J_{split,-}=0.}
-\]
-
-Une preuve historique ne peut justifier deux mitoses successives.
-
-La mémoire verticale attachée à la mère reste attachée à son identité. La fille commence avec une mémoire verticale de propriétaire nulle. Aucune preuve verticale n'est copiée.
-
-## 9. Émission verticale
-
-La sortie verticale n'est ni l'entrée brute, ni le prototype \(C_k\), ni l'erreur instantanée \(e_k\), ni l'identité seule.
-
-Avant l'injection courante, lorsque le noyau parent et les deux branches possèdent une masse positive, définir les formes internes de la Cellule active :
-
-\[
-\boxed{\delta_k^+=\mu_k^+-\mu_k,}
+\beta=\eta\alpha,
 \qquad
-\boxed{\delta_k^-=\mu_k^--\mu_k.}
+\lambda=1-\beta.
 \]
 
-Elles représentent les deux variantes locales que la Cellule sait déjà distinguer relativement à son propre centre.
-
-Si aucune forme interne n'est encore définie, adopter la convention exacte :
+Ainsi :
 
 \[
-\boxed{\delta_k^+=\delta_k^-=0.}
+\boxed{0\le\beta<1,
+\qquad 0<\lambda\le1.}
 \]
 
-La Cellule peut alors transmettre une preuve de masse positive, mais aucun contenu géométrique inventé.
+Après cette dérivation, les lois cognitives ne dépendent que de `β` et `λ`. `T_mem`, `η`, `χ` et `α` n'ont aucune autre autorité.
 
-### 9.1. Branche reconnue
+Une `LAYER` n'avance son horloge que lorsqu'elle reçoit une présentation non vide. L'absence de présentation n'est pas une cible nulle et ne provoque aucun oubli.
 
-La branche verticale \(\sigma_k\in\{+,-\}\) est celle désignée par le même test signé que le routage interne pré-injection.
-
-En cas d'égalité exacte, la branche \(+\) est retenue par convention déterministe immuable pour conserver une émission unique.
-
-Le contenu transmis est :
+Toute mémoire apprenante suit la même EMA :
 
 \[
-\boxed{Y_L=\delta_k^{\sigma_k}.}
+\boxed{X\leftarrow\lambda X+\beta X_{cible}.}
 \]
 
-Sa pertinence est :
+À `eta=0` :
 
 \[
-\boxed{r_{\uparrow,L}=r_k^{learn}=r_{in,L}a_k.}
+\boxed{\beta=0,
+\qquad\lambda=1.}
 \]
 
-L'émission complète est :
-
-\[
-\boxed{
-\mathcal E_L
-=
-(\iota_k,Y_L,r_{\uparrow,L}).
-}
-\]
-
-L'identité indique la source ; elle n'entre pas dans la géométrie du récepteur.
-
-### 9.2. Ordre causal
-
-Pour chaque présentation :
-
-1. lire les états pré-injection ;
-2. calculer les reconnaissances et sélectionner \(k\) ;
-3. déterminer \(\sigma_k\) et émettre \(Y_L\) ;
-4. injecter la preuve dans \(H_k^\pm\) ;
-5. déplacer et recentrer la Cellule.
-
-La Cellule affirme d'abord ce qu'elle savait ; elle apprend ensuite l'observation courante.
-
-### 9.3. Invariance au mouvement
-
-Après déplacement commun \(\Delta\) de la Cellule :
-
-\[
-\mu' = \mu-\Delta,
-\qquad
-\mu_\pm'=\mu_\pm-\Delta,
-\]
-
-et donc :
-
-\[
-\boxed{\delta_\pm'=\delta_\pm.}
-\]
-
-La dérive de \(C_k\) ne change pas le contenu transmis.
-
-### 9.4. Récepteur
-
-Si une couche supérieure existe, elle reçoit :
-
-\[
-I_{L+1}=Y_L,
-\qquad
-r_{in,L+1}=r_{\uparrow,L}
-\]
-
-et applique exactement la même géométrie horizontale.
-
-L'identité inférieure accompagne la transmission comme métadonnée de source mais n'est ni une coordonnée d'entrée ni une identité de Cellule supérieure.
-
-Si aucune couche supérieure n'existe, l'émission alimente le bourgeon terminal.
+L'état cognitif et structurel est alors figé. Les `CELL` existantes peuvent encore reconnaître et produire le `readout`, mais aucune mémoire ne change, aucun seed, aucune promotion et aucune nouvelle `LAYER` ne sont créés.
 
 ---
 
-## 10. Bourgeon vertical terminal
+## 2. Noyau centré universel
 
-Seule la couche terminale possède un bourgeon vertical. Il est distinct du bourgeon racine du réseau : le premier teste une abstraction inter-identitaire, le second permet l’incarnation initiale du flux extérieur.
-
-Le bourgeon est une hypothèse statistique de future couche :
-
-- il n'est pas une couche ;
-- il ne possède aucune Cellule matérialisée ;
-- il ne transmet rien plus haut ;
-- il entretient une bifurcation latente ;
-- il disparaît lorsqu'il est consommé.
-
-Il reçoit :
+Toute mémoire géométrique locale utilise :
 
 \[
-(Y,r,\iota)
-=
-(Y_L,r_{\uparrow,L},\iota_k).
+\boxed{H=(W,C,V)}
 \]
 
-### 10.1. Noyaux latents
-
-Le bourgeon entretient :
+avec `W>0`, `C∈R^D` et `V≥0`, où pour une famille pondérée de noyaux-atome :
 
 \[
-H_B^+=(A_B^+,E_B^+,G_B^+),
-\qquad
-H_B^-=(A_B^-,E_B^-,G_B^-).
+C=\frac1W\sum_s r_sc_s,
 \]
-
-Son parent est :
-
-\[
-A_B=A_B^++A_B^-,
-\qquad
-E_B=E_B^++E_B^-,
-\qquad
-G_B=G_B^++G_B^-.
-\]
-
-La première preuve positive est répartie neutralement. Ensuite, le bourgeon applique la même loi signée que la section 7.1, en remplaçant l'erreur cellulaire par \(Y\).
-
-On obtient :
-
-\[
-\boxed{r_B^++r_B^-=r.}
-\]
-
-Les deux noyaux sont mis à jour par le noyau universel.
-
-### 10.2. Gain du bourgeon
-
-Pour les deux branches de masse positive :
-
-\[
-\nu_B^+=\frac{E_B^+}{A_B^+},
-\qquad
-\nu_B^-=\frac{E_B^-}{A_B^-}.
-\]
-
-Le gain quadratique exact de la coupure latente est :
 
 \[
 \boxed{
-J_B
-=
-\frac{A_B^+A_B^-}{A_B}
-\|\nu_B^+-\nu_B^-\|^2
-\ge0.
+V=
+\frac1W\sum_s r_s
+\left(v_s+\|c_s-C\|^2\right).
 }
 \]
 
-\(J_B>0\) établit qu'une future couche pourrait matérialiser une séparation dans le flux montant. Il n'établit pas encore que cette séparation est transversale à plusieurs identités.
-
-## 11. Concordance verticale entre identités
-
-L'identité n'intervient qu'après le routage géométrique autonome du bourgeon.
-
-Pour chaque identité source \(i\), le bourgeon entretient deux premiers moments pondérés :
+L'énergie quadratique totale du noyau par rapport à l'origine est :
 
 \[
-(\Lambda_i^+,F_i^+),
-\qquad
-(\Lambda_i^-,F_i^-).
+\boxed{Q_0(H)=W(\|C\|^2+V).}
 \]
 
-Si l'émission courante provient de \(i\), les mêmes parts \(r_B^\pm\) que celles du bourgeon alimentent :
+L'énergie centrale dérivée est :
 
 \[
-\Lambda_i^\pm
-\leftarrow
-\Lambda_i^\pm+\alpha_\eta(r_B^\pm-\Lambda_i^\pm),
+\boxed{E(H)=WV.}
 \]
+
+Un vecteur ponctuel `(x,r)` est exactement le noyau `(r,x,0)`.
+
+### 2.1 Somme de noyaux
+
+Pour `H_1=(W_1,C_1,V_1)` et `H_2=(W_2,C_2,V_2)`, poser `W=W_1+W_2`. Alors :
 
 \[
-F_i^\pm
-\leftarrow
-F_i^\pm+\alpha_\eta(r_B^\pm Y-F_i^\pm).
+C=C_1+\frac{W_2}{W}(C_2-C_1),
 \]
-
-Les autres identités oublient sans injection.
-
-Avec une initialisation nulle et le même \(\alpha_\eta\) :
-
-\[
-\boxed{\sum_i\Lambda_i^\pm=A_B^\pm}
-\]
-
-et :
-
-\[
-\boxed{\sum_iF_i^\pm=E_B^\pm.}
-\]
-
-### 11.1. Distinction propre à un propriétaire
-
-Si \(\Lambda_i^+>0\) et \(\Lambda_i^->0\), définir :
-
-\[
-m_i^+=\frac{F_i^+}{\Lambda_i^+},
-\qquad
-m_i^-=\frac{F_i^-}{\Lambda_i^-},
-\]
-
-\[
-\boxed{d_i=m_i^+-m_i^-}
-\]
-
-et :
 
 \[
 \boxed{
-w_i
-=
-\frac{\Lambda_i^+\Lambda_i^-}
-{\Lambda_i^++\Lambda_i^-}.
-}
-\]
-
-Sinon :
-
-\[
-w_i=0,
-\qquad
-d_i=0.
-\]
-
-La puissance de séparation réellement portée par le propriétaire est :
-
-\[
-\boxed{j_i=w_i\|d_i\|^2.}
-\]
-
-La simple visite des deux branches ne suffit pas : une source constante ou une distinction infinitésimale porte une puissance nulle ou infinitésimale.
-
-### 11.2. Concordance croisée sans matrice
-
-Poser :
-
-\[
-W=\sum_iw_i,
-\]
-
-\[
-V=\sum_iw_id_i,
-\]
-
-\[
-U=\sum_iw_i^2\|d_i\|^2.
-\]
-
-Pour \(W>0\), définir :
-
-\[
-\boxed{
-P_\uparrow
-=
-\frac{\|V\|^2-U}{W}.
-}
-\]
-
-Pour \(W=0\) :
-
-\[
-\boxed{P_\uparrow=0.}
-\]
-
-Équivalent explicatif :
-
-\[
-\boxed{
-P_\uparrow
-=
-\frac{
-2\sum_{i<j}w_iw_j\,d_i\cdot d_j
-}{\sum_iw_i}.
-}
-\]
-
-Aucun couple n'est stocké ; la forme \((W,V,U)\) se calcule en une passe.
-
-\(P_\uparrow\) est une concordance signée :
-
-- \(P_\uparrow>0\) : distinctions concordantes entre plusieurs identités ;
-- \(P_\uparrow=0\) : aucune répétition croisée nette ;
-- \(P_\uparrow<0\) : distinctions contradictoires.
-
-Il n'est jamais rectifié dans l'état par \(\max(P_\uparrow,0)\).
-
-Il vérifie :
-
-\[
-\boxed{
-P_\uparrow
-\le
-\sum_iw_i\|d_i\|^2
-=
-\sum_i j_i.
-}
-\]
-
-La concordance ne fabrique donc aucune puissance géométrique.
-
-### 11.3. Cas structurants
-
-- une seule identité : \(P_\uparrow=0\) ;
-- une distinction et une source constante : \(P_\uparrow=0\) ;
-- distinctions orthogonales : \(P_\uparrow=0\) ;
-- distinctions opposées : \(P_\uparrow<0\) ;
-- distinctions identiques portées par au moins deux identités : \(P_\uparrow>0\) ;
-- inversion globale des labels \(+\) et \(-\) : \(P_\uparrow\) inchangé.
-
-## 12. Croissance verticale
-
-Le bourgeon produit une **demande géométrique de naissance verticale** si et seulement si :
-
-\[
-\boxed{J_B>0}
-\]
-
-et :
-
-\[
-\boxed{P_\uparrow>0.}
-\]
-
-Les deux conditions ont des fonctions distinctes :
-
-- \(J_B\) prouve qu'une séparation matérialisable existe dans le flux montant ;
-- \(P_\uparrow\) prouve que cette séparation est portée de manière concordante par plusieurs identités.
-
-Aucun produit arbitraire \(J_BP_\uparrow\) n'est introduit.
-
-La demande n'implique aucune naissance sans autorisation économique.
-
-### 12.1. Matérialisation d'une nouvelle couche
-
-Lorsque la naissance est autorisée, les deux branches du bourgeon deviennent les deux Cellules fondatrices de la nouvelle couche.
-
-Le noyau géométrique historique de la nouvelle couche est :
-
-\[
-\boxed{H_{R,L+1}=H_B^++H_B^-.}
-\]
-
-Les centres fondateurs sont :
-
-\[
-\boxed{C_{L+1,+}=\nu_B^+}
-\]
-
-\[
-\boxed{C_{L+1,-}=\nu_B^-.}
-\]
-
-Chaque branche est recentrée autour de son centre :
-
-\[
-E_{founder,\pm}=0,
-\]
-
-\[
-G_{founder,\pm}
-=
-G_B^\pm-
-\frac{\|E_B^\pm\|^2}{A_B^\pm}.
-\]
-
-Les deux fondatrices reçoivent des identités neuves propres à la nouvelle couche. Chacune initialise sa bifurcation interne par un split neutre.
-
-La preuve du bourgeon est consommée :
-
-- \(H_B^\pm\) sont transférés puis détruits comme états de bourgeon ;
-- les statistiques \((\Lambda_i^\pm,F_i^\pm)\) sont détruites ;
-- l'ancienne couche cesse d'être terminale ;
-- un bourgeon neuf et nul est créé au-dessus de la nouvelle couche.
-
-Une même preuve ne peut créer deux couches.
-
-### 12.2. Récursion
-
-Une fois née, toute couche applique le même contrat :
-
-\[
-\text{reconnaissance}
-\rightarrow
-\text{WTA}
-\rightarrow
-\text{EMA locale}
-\rightarrow
-\text{forme interne}
-\rightarrow
-\text{émission verticale}.
-\]
-
-Il n'existe aucun type spécial de couche profonde.
-
-## 13. Effets topologiques sur la preuve verticale
-
-### 13.1. Mitose d'une source terminale
-
-Lors d'une mitose horizontale :
-
-- la mère conserve son identité et sa mémoire de propriétaire déjà accumulée ;
-- la fille reçoit une identité neuve ;
-- la fille commence avec \(\Lambda^\pm=0\) et \(F^\pm=0\) ;
-- aucune preuve verticale historique n'est copiée ;
-- le bourgeon existant n'est pas réinitialisé par principe.
-
-L'ancienne preuve de la mère décrit correctement sa biographie passée et décroît sous le même \(\alpha_\eta\). La fille doit produire réellement une distinction avant de participer à la concordance verticale.
-
-### 13.2. Changement d'échelle du repère inférieur
-
-Les formes \(Y=\delta^\sigma\) vivent dans les coordonnées normalisées de la couche inférieure.
-
-Si son échelle passe de \(R\) à \(R'\), poser :
-
-\[
-\alpha=\frac R{R'}.
-\]
-
-Les histoires internes des Cellules de cette couche sont d’abord transportées dans la nouvelle unité :
-
-\[
-\boxed{E_i^\pm\leftarrow\alpha E_i^\pm,
-\qquad
-G_i^\pm\leftarrow\alpha^2G_i^\pm.}
-\]
-
-Le flux vertical et les états déjà appris au-dessus sont transportés par la même dilatation commune :
-
-\[
-C\leftarrow\alpha C,
-\qquad
-S\leftarrow\alpha S,
-\qquad
-Q\leftarrow\alpha^2Q.
-\]
-
-Ce transport est un changement de repère, pas un apprentissage. Si \(R=0\) et \(R'>0\), les anciens moments normalisés nécessairement nuls restent nuls et l’observation courante est injectée dans la nouvelle unité. Sous l’EMA exacte, un rayon strictement positif ne redevient pas exactement nul en temps fini ; un tel état constitue une violation d’invariant numérique, non un cas comportemental.
-
-## 14. Décroissance topologique — mort cellulaire
-
-La mort est un opérateur topologique fondamental :
-
-\[
-\boxed{\operatorname{death}_L(i):1\longrightarrow0.}
-\]
-
-Elle est exécutée par la couche qui contient la Cellule. Le réseau ne connaît ni l’identité de la victime, ni son prototype, ni son histoire.
-
-### 14.1. Effet local
-
-La mort de la Cellule \(i\) détruit irréversiblement :
-
-\[
-(C_i,\iota_i,H_i^+,H_i^-)
-\]
-
-et tout état cellulaire qui lui est exclusivement attaché.
-
-Elle ne provoque :
-
-- aucun apprentissage ;
-- aucun déplacement d’une Cellule survivante ;
-- aucune redistribution de son histoire ;
-- aucune fusion implicite ;
-- aucun remboursement économique.
-
-\[
-\boxed{\text{Ce qui n’est plus représenté est réellement perdu.}}
-\]
-
-La maintenance de la Cellule supprimée cesse à la présentation suivante.
-
-### 14.2. Valeur géométrique conservatrice d’une Cellule
-
-La couche juge la perte de ses propres constituants.
-
-Pour une victime \(i\) et une survivante \(j\), définir le déplacement normalisé :
-
-\[
-\boxed{h_{ij}=\frac{C_j-C_i}{R_{geo}}}
-\]
-
-avec la convention dégénérée de la section 4.1.
-
-Si la preuve quadratique de \(i\) était représentée par le seul substitut \(j\), la variation de puissance serait :
-
-\[
-\boxed{
-\Delta_{i\to j}
-=
-A_i\|h_{ij}\|^2-2E_i\cdot h_{ij}.
-}
-\]
-
-La valeur de conservation cellulaire est :
-
-\[
-\boxed{
-K_{i\mid L}
-=
-\left[
-\min_{j\ne i}\Delta_{i\to j}
-\right]_+.
-}
-\]
-
-Après le déplacement et le recentrage complets de la section 7.2, \(E_i=0\), donc :
-
-\[
-\boxed{
-K_{i\mid L}
-=
-A_i\min_{j\ne i}\|h_{ij}\|^2.
-}
-\]
-
-Cette quantité est :
-
-- calculée uniquement par la couche ;
-- exprimée dans la même unité que \(J_{split}\) ;
-- un contrefactuel de conservation, non une redistribution effective ;
-- conservatrice, car elle exige qu’une seule survivante porte toute la preuve de la victime.
-
-### 14.3. Dernière Cellule d’une couche
-
-Une couche ne décide pas seule de tuer sa dernière Cellule active. Cette transformation ferait disparaître un constituant immédiat du réseau et relève donc de la juridiction du réseau.
-
-La couche peut seulement exposer une demande agrégée de disparition. Elle ne révèle aucune identité cellulaire. Pour toute couche existante, y compris \(L=0\) :
-
-\[
-\boxed{N_{cell,L}=0\Longrightarrow\operatorname{truncate}(L).}
-\]
-
-avec :
-
-\[
-\boxed{\operatorname{truncate}(L)=\text{supprimer toutes les couches }k\ge L.}
-\]
-
-En particulier :
-
-\[
-\boxed{\operatorname{truncate}(0)\Longrightarrow\mathcal L=\varnothing.}
-\]
-
-Le réseau et son bourgeon racine persistent ; aucune couche ne bénéficie d’une exception de survie.
-
-### 14.4. Effet sur un bourgeon terminal
-
-La mort d’une Cellule terminale supprime une identité source sans fournir les seconds moments par propriétaire nécessaires à une soustraction exacte du bourgeon.
-
-Par nécessité informationnelle, une mort cellulaire dans la couche terminale invalide donc la preuve verticale candidate :
-
-\[
-\boxed{H_B^+=H_B^-=(0,0,0)}
-\]
-
-et toutes les statistiques :
-
-\[
-\boxed{(\Lambda_i^\pm,F_i^\pm)=0.}
-\]
-
-## 15. Capital géométrique réalisé
-
-La géométrie commune sert de numéraire aux transformations topologiques.
-
-### 15.1. Capital d’une couche
-
-Pour chaque Cellule de masse \(A_i>0\), poser :
-
-\[
-z_i=\frac{C_i-M_R}{R_{geo}},
-\qquad
-\mu_i=\frac{E_i}{A_i},
-\qquad
-\boxed{p_i=z_i+\mu_i.}
-\]
-
-Sous la convention dégénérée, le capital est nul tant qu’aucune différenciation normalisée n’est définie.
-
-Poser :
-
-\[
-A_\Sigma=\sum_iA_i,
-\qquad
-\bar p_L=\frac{\sum_iA_ip_i}{A_\Sigma}.
-\]
-
-Le capital géométrique réalisé de la couche est :
-
-\[
-\boxed{
-\Gamma_L
-=
-\sum_iA_i\|p_i-\bar p_L\|^2.
-}
-\]
-
-Forme agrégée :
-
-\[
-\boxed{
-\Gamma_L
-=
-\sum_iA_i\|p_i\|^2
--
-\frac{\left\|\sum_iA_ip_i\right\|^2}{A_\Sigma}.
-}
-\]
-
-Le centroïde effectif \(p_i\) est invariant au partage de jauge entre déplacement du prototype et résidu moyen :
-
-\[
-z_i\mapsto z_i+\Delta,
-\qquad
-\mu_i\mapsto\mu_i-\Delta
-\Longrightarrow
-p_i\mapsto p_i.
-\]
-
-Après recentrage complet, \(E_i=0\), donc \(p_i=z_i\).
-
-### 15.2. Mitose
-
-Une mitose conserve la masse et le barycentre du parent. Elle augmente exactement le capital de sa couche de :
-
-\[
-\boxed{
-\Gamma_L'-\Gamma_L=J_{split}.
-}
-\]
-
-Ainsi, \(J_{split}\) est le gain géométrique réalisé d’une mitose.
-
-### 15.3. Naissance verticale
-
-Les deux fondatrices d’une nouvelle couche sont matérialisées aux moyennes du bourgeon.
-
-Dans l’espace normalisé de la couche mère, la valeur géométrique de la séparation créée est exactement :
-
-\[
-\boxed{
-J_B
-=
-\frac{A_B^+A_B^-}{A_B}
-\|\nu_B^+-\nu_B^-\|^2.
-}
-\]
-
-Après matérialisation, la nouvelle couche calcule son propre capital \(\Gamma_{L+1}\) dans son repère normalisé courant. En général :
-
-\[
-\boxed{\Gamma_{L+1}^{birth}\ne J_B}
-\]
-
-car la nouvelle couche dérive sa propre échelle \(R_{geo,L+1}\). L’égalité ne vaut que dans la jauge particulière où cette nouvelle échelle vaut \(1\).
-
-Ce n’est pas une rupture de comparabilité : \(J_B\) et \(\Gamma_{L+1}\) ont la même unité géométrique standardisée, mais l’un évalue l’acte de naissance dans le repère du parent et l’autre évalue l’état réalisé dans le repère propre du nouveau-né.
-
-\(P_\uparrow>0\) reste l’admissibilité transversale ; \(J_B\) est la valeur géométrique de la naissance demandée.
-
-### 15.4. Mort cellulaire
-
-En général :
-
-\[
-\Gamma_L-\Gamma_{L\setminus i}
-\]
-
-n’est pas la perte de représentation causée par la mort de \(i\), car ce calcul retire également la preuve détruite du domaine mesuré.
-
-La valeur de conservation d’une Cellule reste donc \(K_{i\mid L}\), et non la variation marginale de \(\Gamma_L\).
-
-### 15.5. Capital exposé au réseau
-
-Une couche expose seulement :
-
-\[
-\boxed{(\Gamma_L,M_L,\text{demandes agrégées}).}
-\]
-
-Le réseau ne reçoit aucun état cellulaire.
-
-Le capital géométrique réalisé exposé au réseau est :
-
-\[
-\boxed{
-\Gamma_{\mathcal N}
-=
-\sum_{L=0}^{L_{max}}\Gamma_L.
-}
-\]
-
-\(\Gamma_{\mathcal N}\) décrit l’état réalisé ; il n’est pas un potentiel unique dont chaque demande serait nécessairement la différence exacte. En particulier, une naissance est jugée par \(J_B\) dans le repère de sa couche mère, puis la nouvelle couche expose son propre \(\Gamma\) dans son repère courant.
-
-Cette additivité exprime le choix constitutionnel suivant :
-
-\[
-\boxed{\text{Chaque niveau d’abstraction matérialisé constitue une connaissance supplémentaire.}}
-\]
-
-La pertinence montante est issue du même flux racine, les distances sont normalisées par chaque couche et toutes les mémoires utilisent le même \(\alpha_\eta\). Les \(\Gamma_L\), \(J_{split}\), \(J_B\) et \(K_{i\mid L}\) sont donc commensurables.
-
-### 15.6. Suppression d’une couche et troncature
-
-La suppression d’une couche \(L\) impose la continuité de la hiérarchie :
-
-\[
-\boxed{
-\operatorname{truncate}(L)
-=
-\text{supprimer toutes les couches }k\ge L.
-}
-\]
-
-La perte géométrique exposée au réseau est :
-
-\[
-\boxed{
-K_{\ge L}
-=
-\sum_{k=L}^{L_{max}}\Gamma_k.
-}
-\]
-
-Le réseau calcule cette somme uniquement à partir des valeurs de ses constituants immédiats. Il n’inspecte aucune Cellule.
-
-La suppression d’un suffixe est définie pour tout \(L\ge0\). Pour \(L=0\), elle détruit toute la hiérarchie et sa perte vaut le capital total réalisé. Lorsque \(\mathcal L=\varnothing\), le capital géométrique réalisé du réseau est nul ; le bourgeon racine contient une preuve de future incarnation, non un capital de couche matérialisé.
-
-## 16. Économie de maintenance et transformations
-
-### 16.1. Empreinte persistante
-
-Soit \(M(\mathcal A)\) l’empreinte de maintenance de l’état persistant \(\mathcal A\).
-
-Elle est la somme des coûts positifs et finis des objets réellement entretenus :
-
-- réseau ;
-- bourgeon racine ;
-- couches ;
-- Cellules ;
-- bourgeon terminal ;
-- statistiques persistantes associées.
-
-Les fonctions physiques de coût restent abstraites. Elles dépendent de la représentation effective, pas d’un facteur temporel arbitraire.
-
-Dans la réalisation de référence, toute empreinte et tout budget brut appartiennent à \(\mathbb N\) et sont calculés par arithmétique entière exacte :
-
-\[
-\boxed{
-M_{units}(\mathcal A)\in\mathbb N,
-\qquad
-B_{units}\in\mathbb N.
-}
-\]
-
-L’unité de référence est l’octet logique. Un réel persistant coûte quatre unités en `f32` et huit unités en `f64`; les identités et compteurs possèdent des coûts entiers propres. Cette convention évite qu’un réseau très grand perde la capacité de distinguer l’ajout d’un objet parce que son budget dépasserait la résolution entière d’un flottant.
-
-La solvabilité exige :
-
-\[
-\boxed{M(\mathcal A)\le B_{units}.}
-\]
-
-
-### 16.1.1. Budget ergonomique en cellules équivalentes
-
-Le budget brut entier reste la quantité exécutée par le moteur. L’interface utilisateur peut toutefois l’exprimer en cellules équivalentes, afin d’abstraire la résolution numérique et de conserver une intuition démographique stable.
-
-Pour le modèle de référence, définir le paquet cellulaire terminal :
-
-\[
-\boxed{
-U_{cell}(D,p)
-=
-M_{cell}(D,p)
+V=
+\frac{W_1V_1+W_2V_2}{W}
 +
-M_{owner}(D,p).
+\frac{W_1W_2}{W^2}\|C_1-C_2\|^2.
 }
 \]
 
-Il représente une Cellule et son enregistrement propriétaire dans le bourgeon terminal. Définir également :
+Cette opération est associative et commutative en arithmétique réelle. Elle est l'unique primitive canonique de fusion de noyaux.
+
+### 2.2 Oubli
+
+L'oubli homothétique est :
 
 \[
-M_{root}=M_{network}+M_{root\ bud},
+\boxed{(W,C,V)\mapsto(\lambda W,C,V).}
 \]
+
+Il ne déplace ni le centre ni la dispersion.
+
+### 2.3 EMA d'un noyau
+
+Pour `H=(W,C,V)` et une cible `H_t=(w,c,v)`, poser :
 
 \[
-M_{shell}=M_{layer}+M_{bud\ base}.
+a=\lambda W,
+\qquad
+b=\beta w,
+\qquad
+W'=a+b.
 \]
 
-Pour un budget ergonomique \(B\ge0\) :
+Si `W'>0` :
+
+\[
+\boxed{C'=C+\frac{b}{W'}(c-C)}
+\]
+
+et :
 
 \[
 \boxed{
-B_{units}(B)=
-\begin{cases}
-M_{root},&B=0,\\
-M_{root}+M_{shell}+\lfloor B\,U_{cell}\rfloor,&B>0.
-\end{cases}
+V'=
+\frac{aV+bv}{W'}
++
+\frac{ab}{W'^2}\|C-c\|^2.
 }
 \]
 
-L’arrondi est dirigé vers le bas : l’interface ne crée jamais davantage d’empreinte que celle demandée. Le même \(B\) produit des budgets bruts différents en `f32` et `f64`, mais conserve une capacité abstraite comparable.
+Si `b=0`, cette loi se réduit exactement à l'oubli du §2.2.
 
-Dans l’API de référence, cette capacité ergonomique est exposée sous le nom `budget`, tandis que la quantité entière effectivement exécutée est exposée sous le nom `budget_units`. Exactement l’une de ces deux valeurs est fournie à la construction ou au rechargement ; toute l’économie interne opère exclusivement sur `budget_units`.
+### 2.4 CONCERN sur un noyau présenté
 
-### 16.2. Coût d’une création
+Soit un noyau mémoire :
 
-Pour une transformation élémentaire de création \(q\) :
+\[
+H_a=(W_a,C_a,V_a)
+\]
+
+et un atome présenté :
+
+\[
+X=(r,c,v).
+\]
+
+La distance quadratique moyenne du contenu de `X` au centre `C_a` est :
+
+\[
+\boxed{D_a(X)=\|c-C_a\|^2+v.}
+\]
+
+Son énergie moyenne par rapport à l'origine est :
+
+\[
+\boxed{D_0(X)=\|c\|^2+v.}
+\]
+
+`H_a` est concerné par `X` si et seulement si :
 
 \[
 \boxed{
- c_q
- =
- \left[
- M(\mathcal A_q')-M(\mathcal A)
- \right]_+.
+D_a(X)<D_0(X)
+\quad\land\quad
+D_a(X)<\|C_a\|^2+V_a.
+}
+\]
+
+La première inégalité est exactement équivalente à :
+
+\[
+\boxed{\|c-C_a\|^2<\|c\|^2.}
+\]
+
+Ainsi la dispersion entrante ne crée aucune direction ni aucun gain ; elle intervient seulement dans l'admissibilité géométrique complète.
+
+Toutes les inégalités sont strictes. Une égalité exacte n'accorde aucune autorité.
+
+En particulier, un noyau mémoire de centre `C_a=0` ne concerne aucun atome.
+
+Pour une population finie `\mathcal H`, poser :
+
+\[
+\boxed{
+I_{\mathcal H}(X)=
+\{a:\ H_a\text{ est concerné par }X\}.
+}
+\]
+
+Pour `a∈I_{\mathcal H}(X)`, définir le gain :
+
+\[
+\boxed{
+g_a(X)=D_0(X)-D_a(X)
+=\|c\|^2-\|c-C_a\|^2>0,
+}
+\]
+
+puis :
+
+\[
+\boxed{q_a(X)=W_ag_a(X).}
+\]
+
+Si `I_{\mathcal H}(X)\ne\varnothing`, la responsabilité est :
+
+\[
+\boxed{
+\theta_a(X)=
+r\frac{q_a(X)}{\sum_{b\in I_{\mathcal H}(X)}q_b(X)}.
+}
+\]
+
+Sinon toutes les responsabilités sont nulles.
+
+Lorsque `I_{\mathcal H}(X)\ne\varnothing` :
+
+\[
+\boxed{\sum_a\theta_a(X)=r.}
+\]
+
+Toute composante concernée reçoit donc une responsabilité strictement positive. Deux noyaux de géométrie exactement identique `(C,V)` ont ensemble exactement l'autorité du noyau obtenu en additionnant leurs supports.
+
+### 2.5 Cible d'une population
+
+Pour une présentation :
+
+\[
+\mathcal P=\{X_s=(r_s,c_s,v_s)\},
+\]
+
+chaque noyau préexistant reçoit :
+
+\[
+m_a=\sum_s\theta_a(X_s).
+\]
+
+Si `m_a>0`, poser :
+
+\[
+\boxed{
+c_a=\frac{\sum_s\theta_a(X_s)c_s}{m_a}}
+\]
+
+et :
+
+\[
+\boxed{
+v_a=
+\frac1{m_a}
+\sum_s\theta_a(X_s)
+\left(v_s+\|c_s-c_a\|^2\right).
+}
+\]
+
+Puis appliquer l'EMA du §2.3 avec la cible `(m_a,c_a,v_a)`.
+
+Si `m_a=0`, appliquer seulement l'oubli du §2.2.
+
+Cette primitive ne décide pas ce que signifie l'absence de noyau concerné. Cette décision appartient au rôle de la population qui l'emploie.
+
+---
+
+## 3. CELL
+
+### 3.1 État
+
+Une `CELL i` possède exactement :
+
+\[
+\boxed{H_i=(A_i,C_i,V_i),
+\qquad A_i>0.}
+\]
+
+`C_i` est la valeur directionnelle reconnue par la `CELL`. `V_i` est la dispersion des présentations apprises autour de cette valeur. `A_i` est son support EMA courant.
+
+À toute frontière causale :
+
+\[
+\boxed{C_i\ne0.}
+\]
+
+### 3.2 CONCERN et ALLOCATE publics
+
+Pour chaque atome présenté :
+
+\[
+X_s=(r_s,c_s,v_s),
+\]
+
+appliquer la primitive du §2.4 à la population des `CELL` du snapshot perceptif et poser :
+
+\[
+\boxed{I_s=I_{\mathcal H_{CELL}}(X_s).}
+\]
+
+Si `I_s=\varnothing` :
+
+\[
+\boxed{\rho_{Ls}=r_s,
+\qquad\rho_{is}=0.}
+\]
+
+Si `I_s\ne\varnothing` :
+
+\[
+\boxed{\rho_{Ls}=0,
+\qquad\rho_{is}=\theta_i(X_s).}
+\]
+
+Ainsi :
+
+\[
+\boxed{\rho_{Ls}+\sum_i\rho_{is}=r_s.}
+\]
+
+L'absence de `CELL` concernée signifie donc « inconnu pour cette `LAYER` ». Aucune classe supplémentaire ni gagnant artificiel n'est introduit.
+
+### 3.3 Reconnaissance
+
+Toute `CELL i` telle que :
+
+\[
+\rho_{is}>0
+\]
+
+reconnaît, pour cet atome, sa valeur de snapshot :
+
+\[
+\boxed{C_i^-.}
+\]
+
+La reconnaissance est éphémère. Elle ne modifie pas la géométrie avant la phase d'apprentissage et participe à la fois au `readout` externe et au contexte vertical du §5.
+
+### 3.4 Apprentissage
+
+Après calcul de toutes les responsabilités, les `CELL` préexistantes sont mises à jour exactement une fois par la règle de population du §2.5 avec `\theta_i=\rho_i`.
+
+Les suppressions de centres nuls et les coalescences exactes appartiennent à la normalisation du §4.4 ; elles ne modifient jamais les reconnaissances ni le contexte déjà déterminés depuis le snapshot perceptif.
+
+### 3.5 Persistance
+
+Une `CELL` acquise n'est pas détruite par l'absence d'alimentation. `A_i` peut décroître par oubli ; `C_i,V_i` restent sa connaissance.
+
+À temps fini en arithmétique réelle, une masse positive soumise seulement à `A_i←λA_i` reste positive. Une réalisation numérique doit préserver cette sémantique : un sous-flux numérique ne constitue pas une destruction cognitive.
+
+Une `CELL` ne disparaît que par contraction matérielle obligatoire définie au §7.4.
+
+### 3.6 Valeur géométrique intrinsèque
+
+Pour toute `CELL` persistante :
+
+\[
+\boxed{
+K_i=
+\frac{\|C_i\|^2}{\|C_i\|^2+V_i}.
 }
 \]
 
 Ainsi :
 
-- l’incarnation racine paie l’empreinte persistante ajoutée par la première couche, sa Cellule fondatrice et son bourgeon vertical ;
-- une mitose paie l’empreinte persistante ajoutée par une Cellule ;
-- une naissance verticale paie la différence exacte entre l’état avec bourgeon et l’état avec nouvelle couche, fondatrices et nouveau bourgeon ;
-
-### 16.3. Mort et perte sèche
-
-Pour une mort ou une troncature :
-
 \[
-\boxed{c_{death}=c_{truncate}=0.}
+\boxed{0<K_i\le1.}
 \]
 
-Une destruction :
+`K_i` est entièrement dérivé. Il ne dépend ni de `A_i`, ni du temps, ni d'une fréquence d'utilisation. Il n'intervient dans aucune loi d'apprentissage ou d'allocation ; il mesure seulement la perte intrinsèque d'une destruction forcée de connaissance.
 
-- ne rembourse aucun coût passé ;
-- ne finance aucune création au même pas ;
-- réduit seulement la maintenance à partir de la présentation suivante.
+---
 
-### 16.4. Juridictions économiques
+## 4. LAYER et Σ
 
-La Cellule expose à sa couche :
+### 4.1 État d'une LAYER
 
-\[
-\boxed{J_{split,i}.}
-\]
+Une `LAYER` possède exactement :
 
-La couche :
-
-- compare les demandes de ses Cellules ;
-- calcule les \(K_{i\mid L}\) ;
-- choisit en interne les mitoses et les victimes ;
-- expose au réseau uniquement une demande agrégée et son coût ;
-- expose son capital \(\Gamma_L\) et sa maintenance \(M_L\).
-
-Le réseau :
-
-- entretient le bourgeon racine et lui présente l’entrée lorsque la hiérarchie est vide ;
-- matérialise la première couche lorsque l’incarnation est solvable ;
-- autorise ou refuse les demandes agrégées de couches ;
-- arbitre une naissance verticale ;
-- décide de supprimer une couche ou un suffixe ;
-- restaure la solvabilité globale à partir d’offres agrégées de contraction ;
-- ne connaît jamais l’existence individuelle des Cellules.
-
-Une couche peut exposer une offre de contraction élémentaire :
+- une population finie de `CELL` ;
+- une mémoire privée `Σ_L` contenant les présentations encore inconnues en cours d'apprentissage.
 
 \[
 \boxed{
-\mathcal O_L^-
+\Sigma_L=\{K_a\}_{a\in A},
+\qquad K_a=(W_a,C_a,V_a).
+}
+\]
+
+Ses noyaux utilisent exactement la même géométrie que les `CELL`. `Σ_L` n'est ni émissive ni une seconde allocation publique : elle ne lit que les atomes qu'aucune `CELL` ne concerne.
+
+### 4.2 DETECT
+
+Pour chaque atome :
+
+\[
+X_s=(r_s,c_s,v_s)
+\]
+
+ayant :
+
+\[
+I_s=\varnothing
+\]
+
+et `c_s\ne0`, appliquer la primitive du §2.4 à la population `Σ_L` du snapshot perceptif.
+
+Si au moins un noyau de `Σ_L` est concerné :
+
+\[
+\boxed{\tau_{as}=\theta_a(X_s).}
+\]
+
+Toute la masse inconnue de cet atome est alors répartie entre les composantes concernées de `Σ_L`.
+
+Si aucun noyau de `Σ_L` n'est concerné et `β>0`, l'atome produit une demande de seed :
+
+\[
+\boxed{K_s^{new}=(\beta r_s,c_s,v_s).}
+\]
+
+Si `β=0`, aucune demande n'est créée.
+
+Un atome de centre `c_s=0` ne peut concerner aucun noyau par la première inégalité du §2.4. Il fait avancer l'horloge de la `LAYER` puisqu'il appartient à une présentation reçue, mais n'alimente ni `CELL`, ni `Σ_L`, et ne crée aucun contexte vertical.
+
+Après calcul de toutes les responsabilités privées, les noyaux préexistants de `Σ_L` sont mis à jour exactement une fois par la règle du §2.5 avec `\theta_a=\tau_a`.
+
+Un noyau qui n'a reçu aucune responsabilité subit donc uniquement l'oubli. Les seeds restent hors de l'état persistant jusqu'à la transaction matérielle du §7.3.
+
+### 4.3 Récurrence
+
+Après mise à jour, et seulement si `β>0`, un noyau **préexistant** de `Σ_L` est mûr si et seulement si :
+
+\[
+\boxed{W_a>\beta
+\qquad\land\qquad
+C_a\ne0.}
+\]
+
+Un seed issu d'une seule présentation vérifie :
+
+\[
+W=\beta r\le\beta
+\]
+
+et ne peut donc pas être mûr au même pas. Sans nouvelle alimentation, `W_a` est seulement multiplié par `λ≤1` ; le temps seul ne peut jamais créer une `CELL`.
+
+Une composante mûre devient une `CELL` portant exactement le même noyau :
+
+\[
+\boxed{H_{new}=K_a.}
+\]
+
+La promotion ne crée aucun payload cognitif supplémentaire et n'a aucun coût matériel marginal.
+
+### 4.4 Normalisation de frontière
+
+Après les mises à jour de `CELL` et de `Σ_L`, une `LAYER` est ramenée à une forme canonique unique avant toute croissance matérielle :
+
+1. supprimer tout noyau de centre `C=0` ;
+2. coalescer, séparément dans les `CELL` et dans `Σ_L`, les noyaux de géométrie exactement identique `(C,V)` par somme de support ;
+3. promouvoir simultanément toutes les composantes mûres issues exclusivement des noyaux de `Σ_L` préexistants au snapshot ;
+4. coalescer à nouveau les `CELL` de géométrie exactement identique ;
+5. supprimer de `Σ_L` tout noyau qui, considéré comme présentation `(1,C_a,V_a)`, est concerné par au moins une `CELL` courante ;
+6. annuler toute demande de seed qui, considérée comme présentation `(1,C_s,V_s)`, est concernée par au moins une `CELL` courante.
+
+La forme normalisée vérifie donc : aucun centre nul, aucun clone exact dans une même population, aucune composante privée déjà couverte par une `CELL`.
+
+Les seeds survivants restent des demandes de croissance et ne deviennent persistants qu'au §7.3. Toute `CELL`, tout seed ou toute `LAYER` créé pendant le pas n'acquiert d'autorité perceptive qu'à la présentation suivante.
+
+---
+
+## 5. Contexte reconnu, readout et récursion
+
+### 5.1 Valeurs reconnues d'un atome
+
+Pour chaque atome présenté `X_s`, définir l'ensemble exact des valeurs reconnues :
+
+\[
+\boxed{
+R_s=\{C_i^-:\ i\in I_s\}/=,
+}
+\]
+
+où `/=` quotient les centres vectoriellement exactement identiques.
+
+Poser :
+
+\[
+\boxed{n_s=|R_s|.}
+\]
+
+Les identités administratives, les supports `A_i`, les dispersions `V_i` des `CELL` et les responsabilités `\rho_{is}` n'appartiennent pas à la géométrie du contexte une fois `R_s` déterminé.
+
+Si `n_s=0`, l'atome ne contribue pas au contexte reconnu.
+
+Si `n_s>0`, chaque valeur `c\in R_s` contribue au contexte par le noyau ponctuel :
+
+\[
+\boxed{
+\left(\frac{r_s}{n_s},c,0\right).
+}
+\]
+
+Cette répartition est uniforme entre les valeurs reconnues distinctes d'un même atome. Elle conserve la masse de l'atome sans introduire d'autorité d'identité, de support ou d'ordre.
+
+### 5.2 Noyau de contexte d'une LAYER
+
+Pour toute la présentation reçue par une `LAYER`, fusionner par la loi du §2.1 toutes les contributions du §5.1 :
+
+\[
+\boxed{
+H_L^{\uparrow}
 =
-(K_L^-,\Delta M_L^-),
-\qquad
-K_L^-=\min_i K_{i\mid L},
+\bigoplus_{s:n_s>0}
+\bigoplus_{c\in R_s}
+\left(\frac{r_s}{n_s},c,0\right).
 }
 \]
 
-avec l’identité de la victime conservée strictement à l’intérieur de la couche.
+S'il n'existe aucune reconnaissance, `H_L^{\uparrow}` est absent.
 
-### 16.5. Réallocation horizontale
-
-Si une mitose \(q\) est bloquée par la capacité et si la mort d’une seule Cellule permettrait de rendre sa création soutenable à la présentation suivante, la couche peut comparer :
+Sinon écrire :
 
 \[
 \boxed{
-R_{qi}=J_{split,q}-K_{i\mid L}.
+H_L^{\uparrow}
+=
+(W_L^{\uparrow},C_L^{\uparrow},V_L^{\uparrow}).
 }
 \]
 
-Une mort volontaire de réallocation n’est admissible que si la meilleure marge interne est strictement positive :
+Sa masse vérifie exactement :
 
 \[
 \boxed{
-\max_{q\ne i}R_{qi}>0.
+W_L^{\uparrow}
+=
+\sum_{s:n_s>0}r_s
+\le|\mathcal P|.
 }
 \]
 
-Seule la mort est exécutée. La mitose doit être redemandée et réévaluée à la présentation suivante.
+`C_L^{\uparrow}` est le barycentre des connaissances effectivement reconnues pendant la présentation, avec conservation de la masse causale des atomes.
 
-La pénurie ne crée aucune demande géométrique ; elle compare une demande déjà constituée à la perte géométrique d’une capacité existante.
+`V_L^{\uparrow}` mesure la dispersion **entre les valeurs reconnues**. Cette dispersion appartient au contexte reconnu lui-même ; elle n'est ni une erreur d'explication, ni une mémoire d'autorité des `CELL`.
 
-### 16.6. Interdiction de la réallocation verticale par troncature
+Le noyau de contexte dépend donc seulement :
 
-Dans une hiérarchie linéaire, une demande verticale est portée par le bourgeon de la couche terminale. Toute troncature susceptible de libérer une couche détruit nécessairement cette couche terminale ou son support causal.
+- des masses de la présentation ;
+- des ensembles exacts de valeurs reconnues par ses atomes.
+
+Conditionnellement à ces ensembles, il est indépendant des supports EMA des `CELL`, de leurs responsabilités d'apprentissage, de leurs identités et de leur ordre.
+
+### 5.3 Autorité verticale
+
+Une `LAYER` possède un contexte vertical émissible si et seulement si :
 
 \[
-\boxed{\text{Une troncature ne peut pas être exécutée pour financer une naissance verticale future.}}
+\boxed{
+H_L^{\uparrow}\text{ existe}
+\quad\land\quad
+V_L^{\uparrow}>0
+\quad\land\quad
+C_L^{\uparrow}\ne0.
+}
 \]
 
-La solvabilité peut toujours imposer une troncature. Mais une preuve détruite ne peut pas être redemandée au pas suivant : le demandeur n’existe plus. Il n’existe donc aucun marché \(J_B-K_{\ge L}\).
+- `V_L^{\uparrow}=0` signifie que toute la reconnaissance de la présentation se réduit à une seule valeur vectorielle distincte ; aucune relation entre connaissances distinctes n'est donc formée ;
+- `C_L^{\uparrow}=0` signifie que le contexte ne possède aucune direction vectorielle canonique ; il reste silencieux.
 
-### 16.7. Solvabilité forcée
+Aucune direction arbitraire n'est construite pour sauver un contexte exactement centré en zéro.
+
+Lorsqu'il est émissible, le contexte de la `LAYER` suivante est exactement la présentation singleton :
+
+\[
+\boxed{
+\operatorname{input}(L_{k+1})
+=
+\{H_{L_k}^{\uparrow}\}.
+}
+\]
+
+Il n'existe donc jamais d'arbre de branches inter-couches : une `LAYER` émet au plus un noyau de contexte par présentation.
+
+### 5.4 Limite de résolution contextuelle
+
+Le contrat vertical conserve exactement le quotient `(W,C,V)` du contexte reconnu. Deux configurations de reconnaissances distinctes produisant exactement le même noyau contextuel sont indiscernables pour les couches supérieures.
+
+Cette perte est native au type cognitif d'Auxein : aucune covariance, orientation de second ordre ou identité de constituant n'est transmise.
+
+En particulier, une relation parfaitement symétrique de centre nul, telle qu'un contexte constitué de `+a` et `-a` à masses égales, n'a aucun représentant vectoriel non nul compatible avec l'invariance orthogonale. Elle reste silencieuse.
+
+### 5.5 Readout externe du NETWORK
+
+Chaque instance reçoit une étiquette d'univers :
+
+\[
+\boxed{u_N\in\mathrm{String}^+.}
+\]
+
+`u_N` est une chaîne non vide, égale à `"auxein"` par défaut. Elle identifie le contexte sémantique extérieur de l'instance et n'intervient dans aucune décision cognitive interne.
+
+Pour tout triplet `(k,s,i)` tel que la `CELL i` de `L_k` reçoit une responsabilité positive sur le noyau présenté :
+
+\[
+X_{ks}=(r_{ks},c_{ks},v_{ks}),
+\]
+
+produire la reconnaissance éphémère :
+
+\[
+\boxed{R_{ksi}=(u_N,c_{ks},C_{ki}^-).}
+\]
+
+Sa représentation externe canonique reste le triplet ordonné JSON-compatible :
+
+```text
+[universe, local_input, recognised]
+```
+
+La dispersion interne `v_{ks}` ne fait pas partie de l'identité externe d'une reconnaissance. Elle participe à l'admissibilité interne, pas à la valeur vectorielle reconnue.
+
+Le `readout` du `NETWORK` est l'ensemble exact des reconnaissances produites sur toutes les `LAYER` effectivement parcourues :
+
+\[
+\boxed{
+\operatorname{readout}_N
+=
+\{(u_N,c_{ks},C_{ki}^-):\rho_{kis}>0\}.
+}
+\]
+
+Deux occurrences de triplets exactement identiques constituent la même reconnaissance et sont coalescées sans multiplicité.
+
+Le `readout` ne contient ni indice de `LAYER`, ni identité de `CELL`, ni masse, ni responsabilité, ni provenance. Il est dérivé, éphémère, n'est jamais relu par Auxein et n'appartient pas à l'état persistant.
+
+### 5.6 Récursion du NETWORK
+
+Le `NETWORK` est une suite ordonnée :
+
+```text
+L0 → L1 → L2 → ...
+```
+
+`L0` reçoit la présentation extérieure uniformisée du §1.1.
+
+Pour chaque `LAYER` suivante qui existait déjà au début du pas, elle reçoit l'unique noyau de contexte émissible produit par la couche précédente. Si aucun contexte émissible n'est produit, aucune couche supérieure n'est parcourue pour cette branche causale ; il n'existe qu'une branche.
+
+Une `LAYER` sans `CELL` ne produit aucun contexte vertical. Elle apprend uniquement les noyaux reçus dans `Σ_L`.
+
+### 5.7 Croissance verticale
+
+Si une `LAYER` terminale produit un contexte émissible et qu'aucune `LAYER` suivante n'existe, la géométrie demande la création d'une nouvelle `LAYER` vide, seulement si `β>0`.
+
+Cette création appartient à la transaction globale du §7.3. Si elle est refusée, l'état cognitif existant reste inchangé. Le contexte courant n'est rejoué ni mémorisé hors de toute `LAYER`.
+
+Une `LAYER` créée pendant le pas ne lit pas le contexte qui a provoqué sa création. Une nouvelle profondeur exige donc au moins une nouvelle occurrence future du contexte.
+
+---
+
+## 6. Causalité d'une présentation
+
+À toute `LAYER` effectivement parcourue sont associés trois états conceptuels :
+
+\[
+\boxed{
+L^-\xrightarrow{\text{perception unique}}L^*
+\xrightarrow{\text{normalisation}}L^+.
+}
+\]
+
+`L^-` est le snapshot persistant au moment où la `LAYER` reçoit sa présentation.
+
+Tous les `CONCERN`, `ALLOCATE`, reconnaissances, ensembles `R_s`, noyau de contexte, cibles EMA et décisions privées de `Σ_L` du pas sont calculés exclusivement depuis `L^-` et la présentation courante.
+
+`L^*` contient les noyaux préexistants après leur unique mise à jour. `L^+` est la forme canonique du §4.4.
+
+Aucun objet absent de `L^-` ne peut lire, concerner, apprendre, être reconnu ou participer au contexte vertical pendant cette présentation. Aucune transformation de `L^*` ou `L^+` ne provoque de replay.
+
+Pour chaque présentation extérieure :
+
+1. restaurer d'abord la solvabilité matérielle si nécessaire (§7.4) ;
+2. figer la suite des `LAYER` existantes pour ce pas et initialiser le `readout` éphémère ;
+3. construire la présentation uniforme du §1.1 et la remettre à `L0` ;
+4. pour chaque `LAYER` existante recevant une présentation non vide, dans l'ordre du réseau :
+   1. coalescer les atomes de géométrie exactement identique `(c,v)` ;
+   2. figer `L^-` ;
+   3. appliquer `CONCERN/ALLOCATE` aux `CELL` de `L^-` ;
+   4. produire les reconnaissances du `readout` et le noyau de contexte `H_L^{\uparrow}` depuis ces mêmes `CELL` ;
+   5. si le contexte est émissible et que la `LAYER` suivante existait au début du pas, lui transmettre immédiatement la présentation singleton `{H_L^{\uparrow}}` ;
+   6. mettre à jour exactement une fois les `CELL` préexistantes ;
+   7. appliquer `DETECT` aux seuls atomes inconnus depuis le `Σ_L` de `L^-`, puis mettre à jour exactement une fois ses composantes préexistantes ;
+   8. normaliser la `LAYER` selon le §4.4 ;
+   9. si la `LAYER` est terminale, que son contexte était émissible, qu'aucun successeur n'existait et que `β>0`, former une demande de nouvelle `LAYER` ;
+5. réunir tous les seeds survivants et l'éventuelle demande de `LAYER` en une transaction globale de croissance (§7.3) ;
+6. exécuter cette transaction entière si elle est payable, sinon ne rien créer ;
+7. terminer la matérialisation éventuelle du `readout`, puis retourner le `readout` et l'état post-pas.
+
+Une reconnaissance peut être livrée dès sa production si le triplet exact n'a pas déjà été livré pendant le pas ; cet ordre de livraison n'a aucune autorité.
+
+---
+
+## 7. Économie matérielle
+
+### 7.1 Principe
+
+Le budget est un plafond entier exact :
+
+\[
+\boxed{B_{units}\in\mathbb N.}
+\]
+
+L'empreinte persistante de l'état est :
+
+\[
+\boxed{M_{units}(\mathcal A)\in\mathbb N.}
+\]
+
+Un état est solvable si et seulement si :
+
+\[
+\boxed{M_{units}(\mathcal A)\le B_{units}.}
+\]
+
+Le budget n'est pas une monnaie accumulée. Une destruction cesse d'occuper de la capacité ; elle ne crée aucun crédit.
+
+L'économie ne modifie aucune loi géométrique.
+
+### 7.2 Packing canonique
+
+Soit :
+
+- `p=4` pour un réel persistant `f32` ;
+- `p=8` pour un réel persistant `f64` ;
+- un `u64` coûte `8` unités ;
+- un tag discret coûte `1` unité.
+
+Le noyau `(W,C,V)` occupe :
+
+\[
+\boxed{U_H=(D+2)p.}
+\]
+
+Une composante de `Σ_L` et une `CELL` possèdent exactement ce payload :
+
+\[
+\boxed{U_C=U_H.}
+\]
+
+Le header logique du `NETWORK` contient :
+
+- `format_version=2`, `dimension`, `steps_seen`, `layer_count` sur `u64` ;
+- un tag `scalar` ;
+- `memory`, `eta` dans le format persistant.
+
+Donc :
+
+\[
+\boxed{U_N=33+2p.}
+\]
+
+Chaque `LAYER` possède deux compteurs `u64`. Aucun slot cognitif inutilisé n'est réservé.
+
+Pour `N_C(L)` `CELL` dans `L` :
+
+\[
+\boxed{
+M_{units}(\mathcal A)
+=
+U_N+
+\sum_L
+\left[16+(|\Sigma_L|+N_C(L))U_H\right].
+}
+\]
+
+Le contexte vertical est éphémère et ne possède aucun coût persistant propre.
+
+La promotion `Σ_L→CELL` conserve exactement le même payload et remplace un slot privé par un slot de connaissance. Son coût marginal est donc :
+
+\[
+\boxed{c_{promote}=0.}
+\]
+
+Chaque nouveau noyau effectivement ajouté à `Σ_L` coûte :
+
+\[
+\boxed{c_{seed}=U_H.}
+\]
+
+Une nouvelle `LAYER` vide coûte seulement son header :
+
+\[
+\boxed{c_{layer}=16.}
+\]
+
+L'état minimal exécutable est `NETWORK + L0` vide :
+
+\[
+\boxed{M_{min}=U_N+16.}
+\]
+
+Si `B_{units}<M_{min}`, l'environnement est inexécutable.
+
+Une interface peut exprimer ergonomiquement le budget en unités `U_H`, mais toute décision interne utilise exclusivement `B_{units}`.
+
+### 7.3 Croissance
+
+Les promotions du §4.4 sont géométriques et matériellement neutres ; elles sont appliquées avant toute création matérielle.
+
+Après lecture de toutes les `LAYER`, réunir :
+
+- toutes les demandes de nouveaux noyaux `Σ_L` encore admissibles du §4.4 ;
+- l'éventuelle nouvelle `LAYER` de frontière requise par le §5.7.
+
+Cet ensemble forme l'unique transaction de croissance matérielle `G_t`.
+
+À `β=0`, `G_t` est vide.
+
+`\mathcal A\oplus G_t` désigne l'état obtenu en appliquant simultanément toutes les créations de ce lot, avec coalescence exacte des noyaux privés identiques.
+
+La transaction est exécutée si et seulement si :
+
+\[
+\boxed{M_{units}(\mathcal A\oplus G_t)\le B_{units}.}
+\]
+
+Sinon aucune création de `G_t` n'a lieu.
+
+L'économie ne sélectionne jamais un sous-ensemble de demandes géométriquement simultanées.
+
+### 7.4 Solvabilité forcée
+
+Une baisse de budget peut rendre l'état courant insolvable. La contraction a lieu avant toute nouvelle perception.
 
 Si :
 
 \[
-M(\mathcal A)>B_{units},
+M_{units}(\mathcal A)>B_{units},
 \]
 
-la destruction n’est pas un gain : elle est obligatoire.
+alors :
 
-Chaque parent choisit parmi les destructions de ses constituants immédiats celle qui expose la plus faible perte géométrique admissible. Le réseau compare uniquement :
+1. vider simultanément toutes les mémoires `Σ_L` ;
+2. supprimer toute `LAYER` terminale sans `CELL`, sans jamais supprimer `L0` ;
+3. si l'état reste insolvable, considérer les valeurs distinctes `K_i` des `CELL` restantes et, pour chaque valeur `k`, l'état `\mathcal A_{>k}` obtenu en conservant exactement les `CELL` telles que `K_i>k`, puis en supprimant les `LAYER` terminales devenues vides ;
+4. s'il existe un `k` tel que `M_{units}(\mathcal A_{>k})\le B_{units}`, choisir le plus petit et remplacer l'état par `\mathcal A_{>k}` ;
+5. sinon, si l'état minimal `NETWORK + L0` vide est solvable, supprimer toutes les `CELL` et ramener le réseau à cet état minimal ; sinon l'environnement est inexécutable.
 
-- les offres agrégées de contraction des couches ;
-- les pertes de suppression de couches ou de suffixes.
-
-Les sacrifices sont répétés jusqu’au retour à :
+Cette forme détruit exactement des classes entières de même valeur :
 
 \[
-\boxed{M(\mathcal A)\le B_{units}.}
+\boxed{K_i=K_j\Longrightarrow(i\text{ survit}\iff j\text{ survit}).}
 \]
 
-Le réseau peut tronquer depuis n’importe quel niveau existant, y compris \(L=0\). Si la hiérarchie est déjà vide et que \(M_{min}>B_{units}\), aucune destruction supplémentaire n’est définie : Auxein est inexécutable.
+`A_i`, l'âge et l'absence du flux ne participent jamais à la décision. Une destruction ne réinjecte aucun passé dans `Σ_L`.
 
-Les égalités exactes sont fermées par un ordre déterministe immuable.
+### 7.5 Absence de remplacement volontaire
 
-### 16.8. Primauté verticale en égalité exacte
+Un état solvable ne détruit aucune `CELL` afin d'en financer une autre. Si la transaction de croissance n'est pas payable, elle attend une frontière future.
 
-Après admissibilité et avant veto économique, si une naissance verticale et une demande horizontale agrégée ont exactement la même valeur positive :
+`K_i` n'est consulté que lorsqu'une perte de connaissance est déjà matériellement obligatoire.
+
+### 7.6 Mutation des paramètres
+
+Le budget peut changer entre deux présentations. Une hausse ne crée rien immédiatement. Une baisse est résolue par le §7.4 à la frontière suivante.
+
+Une modification de `eta` est atomique et redéfinit seulement `β` et `λ` à la frontière suivante. Elle ne crée, ne fusionne ni ne détruit aucun noyau au moment de la mutation.
+
+### 7.7 Invariant et terminaison
+
+À toute frontière solvable :
 
 \[
-\boxed{J_B=J_{split}>0,}
+\boxed{M_{units}(\mathcal A)\le B_{units}.}
 \]
 
-la naissance verticale est ordonnée en premier.
+La contraction forcée termine car elle opère sur des populations finies, puis choisit au plus un cutoff dans l'ensemble fini des valeurs `K_i`.
 
-Cette convention exprime la mission architecturale d’Auxein : produire de l’abstraction lorsque la géométrie ne départage pas les deux formes de croissance.
+Après perception, les EMA, promotions, suppressions de travail couvert et coalescences n'augmentent pas l'empreinte ; la seule croissance persistante est `G_t`, soumise à un unique test de payabilité.
 
-Elle :
+Toute transition finie termine donc sur un état solvable ou sur le verdict « environnement inexécutable ».
 
-- n’ajoute aucun \(\varepsilon\) ;
-- ne multiplie aucune pression ;
-- ne modifie aucune inégalité ;
-- ne supprime jamais le veto de solvabilité.
+---
 
-### 16.9. Séquencement des créations et des pertes volontaires
+## 8. Invariances, dégénérescences et exigences numériques
 
-Après l’injection, chaque couche expose au plus sa meilleure proposition agrégée dans chaque catégorie pertinente. Le réseau exécute itérativement la meilleure création positive et payable, puis ne recalcule que les propositions affectées par la transformation.
+Toute réalisation conforme préserve :
 
-Une proposition non payable ne bloque pas une proposition de valeur inférieure mais payable. Une demande consommée ne réapparaît pas pendant la même présentation. Un objet créé ne demande rien avant la présentation suivante.
+1. permutation des atomes d'une présentation ;
+2. coalescence ou découpage d'atomes de géométrie exactement identique ;
+3. rotation orthogonale de l'espace vectoriel ;
+4. changement d'échelle uniforme avec `C→aC` et `V→a²V` ;
+5. zero-padding exact ;
+6. renommage bijectif des éventuelles poignées administratives ;
+7. conservation de la masse des responsabilités ;
+8. conservation de la masse contextuelle `W_L^{\uparrow}=Σ_{s:n_s>0}r_s` ;
+9. indépendance cognitive des `LAYER` hors présentation `(r,c,v)` ;
+10. absence de replay ;
+11. absence de subdivision causale d'une présentation par une optimisation d'exécution ;
+12. absence d'autorité des supports `A_i` et des responsabilités `ρ_i` dans la géométrie du contexte vertical ;
+13. unicité du noyau contextuel émis par couche et par présentation ;
+14. silence vertical d'une reconnaissance réduite à une seule valeur distincte ;
+15. silence vertical d'un contexte exactement centré en zéro.
 
-La solvabilité forcée peut exécuter autant de destructions que nécessaire avant perception. En revanche :
+L'origine `0` est sémantique ; une translation uniforme n'est donc pas une invariance exigée.
 
-\[
-\boxed{\text{au plus une mort volontaire de réallocation est exécutée par présentation.}}
-\]
+Une égalité géométrique exacte ne peut être résolue par un ID, une adresse mémoire, un ordre de conteneur ou un axe arbitraire.
 
-Cette mort met fin à l’arbitrage topologique du pas. Elle ne rembourse rien et la création espérée doit être redemandée après une nouvelle perception.
+Une masse nulle n'apprend rien. Une `CELL` avec `C_i=0` ne concerne aucun atome. Un contexte avec `C^{\uparrow}=0` n'est pas émis.
 
-### 16.10. Conséquence de croissance sans seuil
+Deux contextes distincts ayant exactement le même quotient `(W,C,V)` sont cognitivement indistinguables pour la couche suivante. Auxein n'invente aucune structure supplémentaire pour les séparer.
 
-La condition géométrique de mitose reste exactement :
+### 8.1 Calcul numérique
 
-\[
-\boxed{J_{split}>0.}
-\]
+Les valeurs persistantes utilisent `f32` ou `f64`. Les calculs intermédiaires doivent être réalisés au moins en `binary64` avant projection atomique dans le format persistant.
 
-Aucune masse minimale, maturité, temporisation ou marge numérique n’est ajoutée. Par conséquent, lorsqu’un budget abondant autorise toute empreinte supplémentaire, une Cellule fraîche peut produire un gain strictement positif après une seule écriture informative et la topologie peut remplir rapidement sa capacité disponible.
+Les réductions dont l'ordre n'a aucune autorité doivent être reproductibles et indépendantes de l'ordre d'itération.
 
-\[
-\boxed{\text{Un budget abondant autorise la saturation ; ce comportement n’est pas un défaut de spécification.}}
-\]
+Les variances et fusions utilisent les formes positives du §2 ; aucune soustraction de grands moments presque égaux n'est nécessaire à la loi canonique.
 
-## 17. Ordre causal d’une présentation
+Aucune valeur seulement petite ne peut être remplacée par zéro au moyen d'un epsilon comportemental. Les zéros structurellement démontrés peuvent être construits exactement.
 
-Une présentation suit :
+Le test `V_L^{\uparrow}=0` signifie que toutes les valeurs reconnues distinctes fusionnées ont exactement la même position après quotient ; aucune tolérance ne crée ni ne détruit une relation verticale.
 
-1. **Solvabilité de l’état vivant** : calcul de la maintenance existante, morts ou troncatures forcées éventuelles.
-2. **Présentation de l’entrée** : sélection du bourgeon racine si la hiérarchie est vide ; sinon propagation dans la topologie survivante.
-3. **Lecture pré-injection** : reconnaissance, WTA, routages internes et émissions verticales.
-4. **Injection statistique unique** : si \(\eta>0\), mises à jour EMA des couches, Cellules, bourgeon et propriétaires avec \(\alpha_\eta\).
-5. **Mouvement et recentrage** : si \(\eta>0\), déplacement complet des Cellules actives.
-6. **Construction des demandes et valeurs** : si \(\eta>0\), incarnation racine éventuelle, \(J_{split}\), \(J_B\), \(P_\uparrow\), \(K_{i\mid L}\), \(\Gamma_L\).
-7. **Arbitrages locaux** : si \(\eta>0\), chaque couche sélectionne ses demandes, morts ou offres agrégées.
-8. **Arbitrage du réseau** : si \(\eta>0\), autorisation des demandes de couches, naissance ou suppression volontaire de couches.
-9. **Transformations** : matérialisations et morts volontaires autorisées, sans nouvelle perception ni nouvelle injection.
+Une implémentation doit empêcher qu'un support positif soit interprété comme une destruction cognitive uniquement à cause d'un sous-flux numérique lors de l'oubli. Une renormalisation commune ou toute représentation mathématiquement équivalente est admissible si elle conserve exactement les décisions canoniques.
 
-Résumé :
+### 8.2 Frontière d'implémentation
 
-\[
-\boxed{
-\text{survivre}
-\to
-\text{percevoir}
-\to
-\text{mémoriser}
-\to
-\text{évaluer}
-\to
-\text{autoriser}
-\to
-\text{transformer}.
-}
-\]
+Caches, index, décroissances différées, queues, parallélisme, chunking, mémoïsation et structures de travail sont autorisés s'ils sont entièrement reconstructibles depuis l'état canonique et n'altèrent aucune décision.
 
-À \(\eta=0\), les étapes 4 à 9 sont neutralisées ; la lecture diagnostique et la solvabilité forcée restent actives. La présentation courante est vue par une seule version de la topologie. Les objets créés après perception commencent leur maintenance et leur activité à la présentation suivante. Les objets morts cessent leur maintenance à la présentation suivante.
+Un index géométrique peut réduire les candidats aux concernements publics et privés, mais seuls les prédicats du §2.4 possèdent l'autorité.
 
-## 18. Fermeture
+La construction du contexte peut être incrémentale, mais elle doit être exactement équivalente à la fusion commutative des contributions du §5.1.
 
-L’interface racine est fermée par :
+Une présentation reste un événement causal unique quelle que soit sa réalisation physique.
 
-\[
-x
-\rightarrow B_{\varnothing}
-\rightarrow\text{incarnation solvable}
-\rightarrow L_0\text{ avec une fondatrice}.
-\]
+---
 
-La géométrie horizontale est fermée par :
+## 9. État persistant canonique
 
-\[
-I
-\rightarrow
-a_i
-\rightarrow k
-\rightarrow r_k^{learn}
-\rightarrow H_k^\pm
-\rightarrow C_k
-\rightarrow J_{split}
-\rightarrow\text{mère et fille}.
-\]
+L'état persistant est minimal.
 
-La géométrie verticale est fermée par :
+### 9.1 NETWORK
 
-\[
-H_k^\pm
-\rightarrow\delta_k^{\sigma_k}
-\rightarrow H_B^\pm
-\rightarrow J_B
-\rightarrow(\Lambda_i^\pm,F_i^\pm)
-\rightarrow P_\uparrow
-\rightarrow\text{nouvelle couche}.
-\]
+- ordre des `LAYER` ;
+- `format_version=2` administratif ;
+- `dimension` ;
+- `scalar∈{f32,f64}` ;
+- `memory` ;
+- `eta` ;
+- compteur de présentations achevées.
 
-La décroissance et l’économie géométrique sont fermées par :
+Le budget appartient à l'environnement matériel et n'est pas une connaissance apprise.
 
-\[
-\boxed{
-\begin{aligned}
-\text{mitose} &: +J_{split},\\
-\text{mort cellulaire} &: -K_{i\mid L},\\
-\text{naissance verticale} &: +J_B,\\
-\text{suppression d’un suffixe} &: -K_{\ge L},\\
-\text{capital de couche} &: \Gamma_L,\\
-\text{solvabilité} &: M(\mathcal A)\le B_{units}.
-\end{aligned}
-}
-\]
+L'étiquette d'univers du `readout` appartient à l'interface et n'est pas une mémoire cognitive.
 
-Toutes les valeurs géométriques ont l’unité :
+### 9.2 LAYER
 
-\[
-\boxed{\text{masse de pertinence}\times\text{distance normalisée}^{2}.}
-\]
+- `Σ_L`, population finie de noyaux `(W,C,V)` ;
+- population de `CELL`.
 
-## 19. Réalisation numérique et sérialisation de référence
+À toute frontière causale, cet état est sous la forme normalisée du §4.4 : aucun centre nul, aucun clone exact dans une même population et aucun noyau privé déjà couvert par une `CELL`.
 
-### 19.1. Trois domaines numériques
+Index, horloges d'exécution paresseuses et tables de travail sont dérivés et ne possèdent aucune autorité cognitive.
 
-La référence sépare explicitement :
+### 9.3 CELL
+
+- `H_i=(A_i,C_i,V_i)`.
+
+Aucune autre mémoire cognitive n'est requise.
+
+### 9.4 Éléments non persistants
+
+Ne sont notamment pas persistés :
+
+- présentations courantes ;
+- responsabilités ;
+- ensembles `R_s` ;
+- noyaux de contexte `H_L^{\uparrow}` ;
+- `readout` ;
+- demandes de croissance non encore commises ;
+- caches et index d'exécution.
+
+---
+
+## 10. Fermeture
+
+Pour un état canonique fini `\mathcal A_t`, une présentation extérieure finie `\mathcal X_t`, une configuration causale valide et un environnement matériel exécutable, les sections précédentes définissent une transition finie et un contexte reconnu éphémère :
 
 \[
 \boxed{
-\begin{aligned}
-\text{géométrie persistante} &: \mathrm{f32}\text{ ou }\mathrm{f64},\\
-\text{calcul intermédiaire} &: \texttt{float Python},\\
-\text{économie} &: \mathbb N\text{ exact}.
-\end{aligned}
+(\mathcal A_t,\mathcal X_t;u_N)
+\longmapsto
+(\mathcal A_{t+1},\operatorname{readout}_{N,t}).
 }
 \]
 
-Le format persistant et \(\eta\) appartiennent à l’état causal. Le budget et le modèle de maintenance appartiennent à l’environnement d’exécution.
+Le noyau cognitif d'une `LAYER` est :
 
-### 19.2. Sérialisation causale stricte
+```text
+présentation de noyaux
+→ CELL concernées
+→ reconnaissances
+→ contexte reconnu unique
+→ LAYER suivante
+```
 
-Le moteur expose une représentation JSON-compatible de son état causal complet et ne réalise aucune entrée-sortie de fichier.
+Ce qu'aucune `CELL` ne reconnaît suit :
 
-Le dictionnaire sérialisé contient au minimum :
+```text
+inconnu
+→ Σ_L
+→ récurrence
+→ CELL locale
+```
 
-- version du schéma et version du modèle ;
-- dimension, format persistant, demi-vie et multiplicateur d’apprentissage `eta` ;
-- indice de présentation et compteurs d’identités ou de couches ;
-- bourgeon racine ;
-- couches, Cellules, bourgeons terminaux et enregistrements propriétaires.
-
-Il exclut :
-
-- budget et modèle de maintenance ;
-- traces, rapports et télémétrie ;
-- flux extérieur et état de son générateur ;
-- propositions, jetons et index éphémères.
-
-\[
-\boxed{\text{clés manquantes ou inconnues}\Longrightarrow\text{rejet}.}
-\]
-
-Le chargement vérifie les versions, dimensions, valeurs finies, identités, compteurs et invariants complets. Une sérialisation n’est autorisée qu’à une frontière de présentation, sans arbitrage local pendant.
-
-Le format numérique d’un état chargé ne peut pas être converti silencieusement. Toute conversion `f64` vers `f32`, ou inversement, est une opération extérieure explicite qui produit un nouvel état validé.
-
-## 20. Note de réalisation non comportementale — pièges d’implémentation
-
-Les lois d’Auxein définissent des résultats mathématiques, non l’obligation de les recalculer depuis zéro à chaque usage. Une implémentation conforme doit préserver exactement la causalité, les égalités déterministes et les valeurs géométriques, mais éviter les recomputations imbriquées accidentelles.
-
-Une règle numérique domine toutes les autres: **fermer les zéros structurellement démontrés; ne jamais fermer une valeur seulement petite**.
-
-La fermeture dépend exclusivement de la résolution du format persistant choisi. Elle ne constitue ni une marge comportementale, ni une maturité, ni un seuil de croissance. Lorsqu’une forme algébrique stable ou positive existe, elle est préférée à une soustraction suivie d’une fermeture.
-
-1. **Reconnaissance et écriture.** Toutes les Cellules évaluent leur reconnaissance ; seule la gagnante calcule son routage interne et écrit.
-
-2. **Agrégats de couche.** Sommes, barycentres, rayons, capitaux et autres dérivés communs sont calculés une fois par version pertinente de l’état puis réutilisés. Une propriété dérivée ne reconstruit pas récursivement des objets agrégés complets lorsqu’une expression directe suffit.
-
-3. **Valeurs de conservation.** La recherche exacte d’un substitut est évaluée au plus une fois par victime et par état pertinent. La répéter pour chaque création, chaque victime puis chaque substitut transforme facilement un coût quadratique légitime en boucle cubique accidentelle. Un index spatial éphémère et exact est permis ; il ne devient ni voisinage persistant, ni relation apprise, ni état canonique.
-
-4. **Concordance croisée.** La forme agrégée \(\bigl(\|V\|^2-U\bigr)/W\) est une identité mathématique, mais sa soustraction flottante peut laisser un résidu de signe arbitraire lorsque les termes s’annulent. Comme le signe strict de \(P_\uparrow\) autorise une naissance verticale, une implémentation ne doit pas créer de preuve à partir de cette annulation numérique. Évaluer de préférence la forme croisée en une passe : avant d’ajouter le propriétaire \(i\), accumuler \(C\leftarrow C+2w_iV\cdot d_i\), puis \(V\leftarrow V+w_id_i\), et poser \(P_\uparrow=C/W\). Cette réalisation reste en \(O(ND)\), ne stocke aucun couple et garantit notamment \(P_\uparrow=0\) lorsqu’un seul propriétaire porte une distinction.
-
-5. **Puissance quadratique résolue.** Les expressions
-
-   \[
-   P_{struct}=Q-\frac{\|S\|^2}{W}
-   \]
-
-   et
-
-   \[
-   R_{geo}^2=\frac{P_{struct}}{W}
-   \]
-
-   soustraient des moments persistants arrondis indépendamment. La projection dans `f32` ou `f64` peut imposer un \(Q\) immédiatement supérieur à \(\|S\|^2/W\) afin de préserver l’invariant, même lorsque le flux est un point exact. Ce résidu ne doit devenir ni rayon, ni capital, ni preuve. Une implémentation définit une unique primitive de **différence quadratique résolue**, dérivée de la résolution du format et de l’erreur des opérandes. Cette primitive ferme aussi bien un petit résidu positif qu’un petit résidu négatif lorsqu’ils sont numériquement indécidables. Toute valeur positivement résolue reste comportementale, quelle que soit sa taille absolue.
-
-6. **Unicité de la réalisation numérique.** Une grandeur canonique ne possède pas plusieurs évaluations flottantes concurrentes. En particulier, le rayon est dérivé de la même puissance structurelle résolue que le noyau ; il n’est pas recalculé séparément sous une forme algébriquement équivalente. Deux expressions mathématiquement identiques peuvent sinon classer simultanément le même état comme dégénéré et non dégénéré.
-
-7. **Recentrage stable.** La forme littérale
-
-   \[
-   Q'=Q-2\Delta\cdot S+W\|\Delta\|^2
-   \]
-
-   est canonique mais peut annuler trois termes proches. Après avoir conservé \(P_{struct}\), une réalisation stable calcule :
-
-   \[
-   S'=S-W\Delta,
-   \qquad
-   Q'=P_{struct}+\frac{\|S'\|^2}{W}.
-   \]
-
-   Lorsque \(\Delta=\mu=S/W\) est la propre moyenne du noyau, le résultat structurel est connu exactement :
-
-   \[
-   \boxed{S'=0,\qquad Q'=P_{struct}.}
-   \]
-
-   Ce zéro est construit directement ; il n’est pas recherché par soustraction composante par composante.
-
-   Une limite demeure inhérente au stockage en moments bruts : après une translation extrême, si le nouveau \(P_{move}\) est si grand que \(P_{struct}\) tombe sous son ulp dans le format persistant, \((W,S,Q)\) ne peut plus représenter simultanément les deux puissances. La fermeture de \(P_{struct}\) à zéro dans ce cas relève de la résolution déclarée du format. Préserver davantage exigerait un autre état persistant, par exemple des moments centraux ; ce serait une modification architecturale et non une correction locale d’implémentation.
-
-8. **Capital de couche.** La forme agrégée
-
-   \[
-   \sum_iA_i\|p_i\|^2-
-   \frac{\left\|\sum_iA_ip_i\right\|^2}{A_\Sigma}
-   \]
-
-   est exacte mais sujette à l’annulation lorsque les représentations réalisées coïncident. Une implémentation évalue de préférence la forme centrée ou une récurrence barycentrique pondérée équivalente, composée uniquement de distances quadratiques non négatives. Des représentations identiques doivent produire exactement \(\Gamma_L=0\).
-
-9. **Conservation après mouvement.** Les offres de mort et les réallocations sont construites après le déplacement et le recentrage complets. À cet instant, \(E_i=0\) canoniquement ; la référence évalue donc directement :
-
-   \[
-   \boxed{K_{i\mid L}=A_i\min_{j\ne i}\|h_{ij}\|^2.}
-   \]
-
-   Réintroduire le terme général \(-2E_i\cdot h_{ij}\) donnerait une valeur économique à un éventuel résidu flottant du recentrage, alors que ce résidu n’est pas une géométrie canonique post-mouvement.
-
-10. **Assertions de l’invariant quadratique.** Une mise à jour EMA, une translation ou une projection de format peut laisser \(WQ-\|S\|^2\) légèrement négatif par accumulation de plusieurs arrondis. La tolérance d’assertion est bornée par la chaîne d’opérations et les échelles réellement manipulées ; elle n’est pas limitée arbitrairement à un ulp unique. Une violation au-delà de cette borne reste une erreur. Cette tolérance d’assertion ne produit jamais de valeur comportementale positive.
-
-11. **Zéros vectoriels et frontières de phase.** Un premier moment global connu nul après recentrage ne doit pas être interprété comme une nouvelle direction à cause d’un résidu. En revanche, une différence entre deux branches, un produit scalaire de routage ou une distinction entre propriétaires n’est pas fermé uniquement parce qu’il est petit : ces valeurs peuvent représenter une géométrie réelle et déterminer légitimement une phase. Toute fermeture supplémentaire doit être justifiée par une identité exacte, puis soumise aux tests d’équivariance causale.
-
-12. **Transformations et demandes.** Une demande consommée ne réapparaît pas au même pas ; un objet créé ne demande rien avant le suivant. Une transformation ne fait recalculer que les propositions dont les données ont changé.
-
-13. **Assertions et télémétrie.** Les invariants complets restent vérifiables aux frontières causales, après transformation ou en mode diagnostic. Une primitive locale ne déclenche pas récursivement la validation complète du réseau. Les rapports détaillés ne sont pas calculés lorsqu’ils ne sont pas demandés.
-
-14. **Profilage.** Le régime saturé, avec morts de réallocation et recherches de substituts actives, est obligatoire pour détecter les dégénérescences que les petites populations masquent.
-
-Pour une couche de \(N\) Cellules en dimension \(D\) :
+La croissance horizontale et la croissance verticale sont donc strictement distinctes :
 
 \[
-\text{perception ordinaire}=O(ND),
+\boxed{
+\text{inconnu récurrent}
+\longrightarrow
+\text{nouvelle connaissance dans la même LAYER},
+}
 \]
 
 \[
-\text{toutes les valeurs de conservation}=O(N^2D)
+\boxed{
+\text{connaissances distinctes reconnues dans une même présentation}
+\longrightarrow
+\text{contexte de la LAYER suivante}.
+}
 \]
 
-peut être légitime. Une complexité :
+Les quatre primitives cognitives nommées sont :
 
-\[
-\boxed{O(N^3D)}
-\]
+```text
+CONCERN
+ALLOCATE
+DETECT
+CONTEXT
+```
 
-indique généralement qu’une recherche de substitut ou un agrégat de couche est recalculé à l’intérieur d’une boucle qui le possède déjà.
+`CONCERN` et `ALLOCATE` utilisent l'unique primitive de population du §2.4. `DETECT` applique cette même géométrie privément à `Σ_L`. `CONTEXT` fusionne les valeurs reconnues, sans responsabilité d'apprentissage ni identité, par la même loi de noyau du §2.1.
 
-Les caches et index d’exécution doivent être entièrement reconstruisibles depuis l’état canonique, ne porter aucune mémoire comportementale et ne jamais modifier une décision.
+Une abstraction supérieure n'est ni un constituant oublié ni une branche issue d'une interprétation particulière. Elle est une régularité récurrente du **contexte compact des connaissances déjà reconnues** par l'étage précédent.
+
+La géométrie détermine les connaissances présentes, les concernements et les créations admissibles. L'économie maintient un état fini sans sélectionner arbitrairement entre créations simultanées. Une connaissance acquise persiste indépendamment de son actualité et ne peut être perdue que lorsqu'une contraction matérielle est obligatoire, selon sa valeur géométrique intrinsèque.
