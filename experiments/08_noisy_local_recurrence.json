@@ -1,0 +1,9 @@
+{
+  "name": "noisy_local_recurrence",
+  "description": "A small noisy cluster is learned horizontally; singleton recognition alone does not force hierarchy.",
+  "model": {"dimension": 2, "memory": 20, "eta": 1, "scalar": "f64", "budget": 300},
+  "seed": 7,
+  "phases": [
+    {"name": "cluster", "steps": 200, "world": {"name": "gaussian-mixture", "centers": [[2.0,0.0]], "std": 0.05}}
+  ]
+}

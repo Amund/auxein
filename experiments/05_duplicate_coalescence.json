@@ -1,0 +1,9 @@
+{
+  "name": "duplicate_coalescence",
+  "description": "Artificial splitting of identical atoms does not change the logical external measure or learned context.",
+  "model": {"dimension": 1, "memory": 10, "eta": 1, "scalar": "f64", "budget": 200},
+  "phases": [
+    {"name": "learn-local", "steps": 12, "world": {"name": "point-cycle", "points": [[1.0],[3.0]]}},
+    {"name": "split-context", "steps": 12, "world": {"name": "presentation-cycle", "presentations": [[[1.0],[1.0],[3.0],[3.0]]]}}
+  ]
+}

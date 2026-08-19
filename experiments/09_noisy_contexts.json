@@ -1,0 +1,10 @@
+{
+  "name": "noisy_contexts",
+  "description": "Two noisy local concepts recurring together can form a higher contextual CELL through contextual recursion.",
+  "model": {"dimension": 2, "memory": 20, "eta": 1, "scalar": "f64", "budget": 500},
+  "seed": 11,
+  "phases": [
+    {"name": "learn-a", "steps": 120, "world": {"name": "gaussian-mixture", "centers": [[2.0,0.0],[0.0,2.0]], "std": 0.03}},
+    {"name": "co-context", "steps": 120, "world": {"name": "presentation-cycle", "presentations": [[[2.0,0.0],[0.0,2.0]]], "noise": 0.03}}
+  ]
+}
