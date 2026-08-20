@@ -1,0 +1,102 @@
+{
+  "name": "predictive_oracle_decode",
+  "description": "External oracle verifies that learned A→B temporal knowledge predicts B from a novel A-like present before B is observed, while temporal sequencing remains strictly adjacent and directed.",
+  "model": {
+    "dimension": 2,
+    "memory": 10,
+    "eta": 1,
+    "scalar": "f64",
+    "mode": "predictive",
+    "budget": 400
+  },
+  "oracle": {
+    "labels": {
+      "A": [1.0, 0.0],
+      "B": [0.0, 1.0]
+    },
+    "max_distance2": 0.05,
+    "final": {
+      "layer": 0,
+      "expected": {
+        "concept_cells": ["A", "B"],
+        "sequence_cells": [["A", "B"]]
+      }
+    }
+  },
+  "phases": [
+    {
+      "name": "learn-A-then-B",
+      "steps": 36,
+      "world": {
+        "name": "point-cycle",
+        "points": [[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]]
+      }
+    },
+    {
+      "name": "freeze-and-predict-forward",
+      "steps": 2,
+      "eta": 0,
+      "world": {
+        "name": "point-cycle",
+        "points": [[0.92, 0.08], [0.08, 0.92]]
+      },
+      "checks": [
+        {
+          "step": 0,
+          "expected": {
+            "concepts": [{"input": "A", "recognised": "A"}],
+            "sequences": [],
+            "predictions": [{"current": "A", "source": "A", "predicted": "B"}]
+          }
+        },
+        {
+          "step": 1,
+          "expected": {
+            "concepts": [{"input": "B", "recognised": "B"}],
+            "sequences": [{"input": ["A", "B"], "recognised": ["A", "B"]}],
+            "predictions": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "clear-adjacency",
+      "steps": 1,
+      "eta": 0,
+      "world": {"name": "point-cycle", "points": [[0.0, 0.0]]},
+      "checks": [
+        {
+          "step": 0,
+          "expected": {"concepts": [], "sequences": [], "predictions": []}
+        }
+      ]
+    },
+    {
+      "name": "reverse-does-not-invent-transition",
+      "steps": 2,
+      "eta": 0,
+      "world": {
+        "name": "point-cycle",
+        "points": [[0.08, 0.92], [0.92, 0.08]]
+      },
+      "checks": [
+        {
+          "step": 0,
+          "expected": {
+            "concepts": [{"input": "B", "recognised": "B"}],
+            "sequences": [],
+            "predictions": []
+          }
+        },
+        {
+          "step": 1,
+          "expected": {
+            "concepts": [{"input": "A", "recognised": "A"}],
+            "sequences": [],
+            "predictions": [{"current": "A", "source": "A", "predicted": "B"}]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,6 +1,6 @@
-# AUXEIN v0.3.0 — Canon mathématique et matériel
+# AUXEIN v0.4.0 — Canon mathématique et matériel
 
-**Version : 0.3.0**  
+**Version : 0.4.0**  
 **Statut : canon mathématique et matériel**
 
 \[
@@ -26,9 +26,16 @@ Le `NETWORK` fonctionne dans exactement un mode causal :
 ```text
 geometry
 temporal
+predictive
 ```
 
-`geometry` applique seulement la transformation précédente. `temporal` applique la même géométrie sans modification et ajoute, pour chaque `LAYER`, un espace de succession `T(E)=E⊕E` appartenant au `NETWORK`. Cet espace apprend les passages strictement adjacents `step-1 → step` entre contextes reconnus de cette `LAYER`.
+Les modes sont strictement cumulatifs :
+
+\[
+\boxed{\texttt{geometry}\subset\texttt{temporal}\subset\texttt{predictive}.}
+\]
+
+`geometry` applique seulement la transformation géométrique. `temporal` conserve cette géométrie sans modification et ajoute, pour chaque `LAYER`, un espace de succession `T(E)=E⊕E` appartenant au `NETWORK`, qui apprend les passages strictement adjacents `step-1 → step` entre contextes reconnus. `predictive` conserve intégralement les deux précédents et ajoute une lecture éphémère des `CELL` temporelles existantes : le contexte reconnu courant peut concerner leur projection source et émettre leur projection successeur comme futur connu possible.
 
 Une `CELL` représente une connaissance directionnelle acquise. Elle se déclare concernée uniquement par sa propre géométrie. Plusieurs `CELL` peuvent se déclarer concernées simultanément.
 
@@ -65,7 +72,10 @@ Principes normatifs :
 23. le `NETWORK` est seul responsable de la construction des présentations temporelles et de leur mémoire causale précédente ;
 24. les connaissances temporelles n'émettent aucun contexte vertical et ne forment aucun `T(T(E))` ;
 25. géométrie et temporalité partagent une économie matérielle unique ;
-26. le `readout` peut réunir les reconnaissances géométriques et temporelles d'un même pas sans créer aucun lien cognitif persistant entre elles.
+26. le `readout` peut réunir les reconnaissances géométriques et temporelles d'un même pas sans créer aucun lien cognitif persistant entre elles ;
+27. la prédiction ne crée, n'apprend ni ne modifie aucune connaissance : elle projette uniquement des `CELL` temporelles préexistantes ;
+28. une prédiction n'est jamais réinjectée comme présentation, contexte, mémoire causale ou entrée d'une autre prédiction ;
+29. plusieurs futurs concernés sont tous émis ; aucune sélection, probabilité, WTA ou classement prédictif n'existe.
 
 ---
 
@@ -180,16 +190,16 @@ Toute mémoire apprenante suit la même EMA :
 \qquad\lambda=1.}
 \]
 
-Les connaissances et la structure apprenante sont alors figées. Les `CELL` existantes peuvent encore reconnaître et produire le `readout`, mais aucune mémoire apprenante ne change, aucun seed, aucune promotion et aucune nouvelle `LAYER` ne sont créés. En mode `temporal`, le registre causal du pas précédent continue néanmoins d'avancer conformément au §5.9 : le gel de l'apprentissage n'arrête pas l'ordre des présentations.
+Les connaissances et la structure apprenante sont alors figées. Les `CELL` existantes peuvent encore reconnaître et produire le `readout`, mais aucune mémoire apprenante ne change, aucun seed, aucune promotion et aucune nouvelle `LAYER` ne sont créés. En modes `temporal` et `predictive`, le registre causal du pas précédent continue néanmoins d'avancer conformément au §5.9 : le gel de l'apprentissage n'arrête pas l'ordre des présentations.
 
-Une population apprenante n'avance son horloge que lorsqu'elle reçoit une présentation non vide dans son propre espace. En mode `temporal`, l'espace géométrique d'une `LAYER` et son espace temporel associé possèdent donc des horloges d'apprentissage indépendantes. L'absence de présentation temporelle ne provoque aucun oubli temporel.
+Une population apprenante n'avance son horloge que lorsqu'elle reçoit une présentation non vide dans son propre espace. En modes `temporal` et `predictive`, l'espace géométrique d'une `LAYER` et son espace temporel associé possèdent donc des horloges d'apprentissage indépendantes. L'absence de présentation temporelle ne provoque aucun oubli temporel.
 
 ### 1.4 Mode causal
 
 Le paramètre de construction :
 
 \[
-\boxed{mode\in\{\texttt{geometry},\texttt{temporal}\}}
+\boxed{mode\in\{\texttt{geometry},\texttt{temporal},\texttt{predictive}\}}
 \]
 
 vaut `geometry` par défaut.
@@ -197,7 +207,10 @@ vaut `geometry` par défaut.
 `mode` appartient à la configuration causale persistante et est immuable pour un état existant. Toute autre valeur est invalide.
 
 - `geometry` : seule la cognition dans `E` existe ;
-- `temporal` : la cognition géométrique dans `E` reste inchangée et le `NETWORK` entretient en plus la cognition de succession dans `T(E)=E\oplus E`.
+- `temporal` : `geometry` inchangé, plus la cognition de succession dans `T(E)=E\oplus E` ;
+- `predictive` : `temporal` inchangé, plus la projection éphémère `présent reconnu → successeur connu possible` définie au §5.12.
+
+Il n'existe aucun drapeau prédictif indépendant : la prédiction implique nécessairement la cognition temporelle.
 
 ---
 
@@ -822,7 +835,7 @@ Une `LAYER` créée pendant le pas ne lit pas le contexte qui a provoqué sa cr�
 
 ### 5.8 Espace temporel associé à une LAYER
 
-En mode `temporal`, pour chaque `LAYER L_k` de monde `E=\mathbb R^D`, le `NETWORK` possède deux populations finies dans :
+En modes `temporal` et `predictive`, pour chaque `LAYER L_k` de monde `E=\mathbb R^D`, le `NETWORK` possède deux populations finies dans :
 
 \[
 \boxed{T(E)=E\oplus E\simeq\mathbb R^{2D}.}
@@ -845,11 +858,11 @@ Les deux espaces sont strictement étanches :
 - les deux populations ne partagent ni `Σ`, ni allocation, ni promotion, ni contexte cognitif ;
 - aucune `CELL` temporelle ne participe au contexte vertical du §5.2 ni à la croissance verticale du §5.7.
 
-Leur seule coexistence est structurelle dans le même `NETWORK`, économique au §7 et externe dans le `readout` du §5.12.
+Leur seule coexistence est structurelle dans le même `NETWORK`, économique au §7 et externe dans le `readout` des §5.12–5.13.
 
 ### 5.9 Registre précédent et présentation temporelle
 
-Pour chaque `L_k`, le `NETWORK` entretient en mode `temporal` un registre causal :
+Pour chaque `L_k`, le `NETWORK` entretient en modes `temporal` et `predictive` un registre causal :
 
 \[
 \boxed{P_k\in\{\varnothing\}\cup\{(W,C,V):W>0,\ C\in E,\ V\ge0\}.}
@@ -981,7 +994,74 @@ C_-=0\qquad\land\qquad C_+=0,
 
 alors le centre temporel vaut exactement zéro. Conformément aux §2.4 et §4.2, cette présentation peut faire avancer l'horloge temporelle mais ne peut être reconnue, alimenter `Σᵀ` ni créer une connaissance. Aucune direction artificielle n'est construite pour distinguer `0→0`.
 
-### 5.12 Readout temporel et contexte global du pas
+### 5.12 Projection prédictive
+
+Cette section s'applique uniquement en mode `predictive`. Elle ne définit aucune nouvelle mémoire ni aucune nouvelle population.
+
+Soit le noyau de contexte géométrique reconnu courant d'une `LAYER` :
+
+\[
+H_{L_k,t}^{\uparrow}=(W_t,C_t,V_t),
+\]
+
+lorsqu'il existe, y compris s'il est verticalement silencieux. Pour toute `CELL` temporelle **préexistante au début de sa frontière temporelle du pas** :
+
+\[
+H_j^T=(A_j^T,C_{j,-}^T\oplus C_{j,+}^T,V_j^T),
+\]
+
+le `NETWORK` considère uniquement les deux noyaux ponctuels dérivés :
+
+\[
+\boxed{X_t^P=(1,C_t,0),\qquad H_{j,-}^P=(1,C_{j,-}^T,0).}
+\]
+
+La `CELL` temporelle `j` est prédictivement concernée si et seulement si le `CONCERN` canonique du §2.4 appliqué à ces deux noyaux ponctuels est vrai, soit exactement :
+
+\[
+\boxed{
+\|C_t-C_{j,-}^T\|^2<\|C_t\|^2
+\quad\land\quad
+\|C_t-C_{j,-}^T\|^2<\|C_{j,-}^T\|^2.
+}
+\]
+
+Ni `A_j^T` ni `V_j^T` ne participent à ce test. Le quotient temporel du §5.11 ne conserve pas séparément les dispersions source et cible ; reconstruire un rayon source depuis `V_j^T` inventerait donc une information absente. La projection prédictive porte canoniquement sur le centre seulement.
+
+Pour toute `CELL` ainsi concernée, produire l'élément prédictif éphémère :
+
+\[
+\boxed{
+Q_{ktj}=(u_N,C_t,C_{j,-}^T,C_{j,+}^T).
+}
+\]
+
+Sa représentation externe JSON-compatible est :
+
+```text
+[universe, current_context, recognised_source, predicted_successor]
+```
+
+Poser :
+
+\[
+\boxed{\mathcal Q_t=\{Q_{ktj}:\text{concernement prédictif}\}.}
+\]
+
+Deux quadruplets exactement identiques sont coalescés sans multiplicité. Aucun indice de `LAYER`, identité de `CELL`, support, variance, responsabilité ou provenance n'est exposé.
+
+Conséquences normatives :
+
+- si plusieurs `CELL` concernées partagent la même source mais des successeurs distincts, tous les successeurs sont émis ;
+- une projection source `C_{j,-}^T=0` ne peut concerner aucun présent ;
+- une projection cible `C_{j,+}^T=0` est une prédiction explicite valide et reste distincte d'une absence de prédiction ;
+- `Σ_k^T` ne prédit jamais : seule une connaissance devenue `CELL` possède cette autorité ;
+- une `CELL` temporelle créée ou promue pendant le pas ne peut prédire qu'à partir du pas suivant ;
+- aucune prédiction n'est relue par Auxein, ne modifie `P_k`, ne forme une présentation temporelle et ne déclenche une prédiction de profondeur supérieure.
+
+Ainsi, si `A→B` et `B→C` sont connus, un présent `A` peut émettre `B` mais jamais `C` par fermeture transitive au même pas. La prédiction canonique porte exclusivement sur `step → step+1`.
+
+### 5.13 Readout temporel, prédictif et contexte global du pas
 
 Pour toute `CELL` temporelle `j` concernée par l'atome :
 
@@ -1042,7 +1122,27 @@ Sa représentation JSON-compatible canonique est :
 }
 ```
 
-Les deux listes ne sont jamais fusionnées vectoriellement. Leur appartenance au même `readout` exprime uniquement qu'elles ont été reconnues pendant la même frontière causale extérieure. Le `readout` ne crée ni lien persistant ni communication cognitive entre les deux espaces.
+En mode `predictive` :
+
+\[
+\boxed{
+\operatorname{readout}_{N,t}
+=
+(\mathcal C_t,\mathcal S_t,\mathcal Q_t).
+}
+\]
+
+Sa représentation JSON-compatible canonique est :
+
+```text
+{
+  "concepts":     [...],
+  "sequences":    [...],
+  "predictions":  [...]
+}
+```
+
+Ces listes ne sont jamais fusionnées vectoriellement. Leur appartenance au même `readout` exprime uniquement leur coexistence à la même frontière causale extérieure. Le `readout` ne crée aucun lien persistant ni communication cognitive entre ces vues.
 
 ---
 
@@ -1057,14 +1157,14 @@ X^-\xrightarrow{\text{perception unique}}X^*
 }
 \]
 
-Pour une `LAYER`, ces états sont ceux du compartiment géométrique. En mode `temporal`, la population temporelle associée possède sa propre frontière de présentation et applique exactement la même discipline de snapshot.
+Pour une `LAYER`, ces états sont ceux du compartiment géométrique. En modes `temporal` et `predictive`, la population temporelle associée possède sa propre frontière de présentation et applique exactement la même discipline de snapshot. La lecture prédictive du mode `predictive` observe le snapshot temporel préexistant et ne constitue pas une population apprenante.
 
 Tous les `CONCERN`, `ALLOCATE`, reconnaissances, contextes, cibles EMA et décisions privées d'un espace sont calculés exclusivement depuis son snapshot `X^-` et sa présentation courante. Aucun objet créé pendant le pas ne peut lire, concerner, apprendre, être reconnu ou émettre pour ce même pas. Aucun replay n'existe.
 
 Pour chaque présentation extérieure :
 
 1. restaurer d'abord la solvabilité matérielle si nécessaire (§7.4) ; toute contraction forcée invalide simultanément tous les registres `P_k` ;
-2. figer la suite des `LAYER` existantes pour ce pas et initialiser les contextes éphémères `\mathcal C_t` et, en mode `temporal`, `\mathcal S_t` ;
+2. figer la suite des `LAYER` existantes pour ce pas et initialiser les contextes éphémères `\mathcal C_t`, en modes `temporal` et `predictive` `\mathcal S_t`, et en mode `predictive` `\mathcal Q_t` ;
 3. construire la présentation uniforme du §1.1 et la remettre à `L0` ;
 4. pour chaque `LAYER` existante recevant une présentation géométrique non vide, dans l'ordre du réseau :
    1. coalescer les atomes de géométrie exactement identique `(c,v)` ;
@@ -1076,17 +1176,18 @@ Pour chaque présentation extérieure :
    7. appliquer `DETECT` aux seuls atomes géométriques inconnus depuis le `Σ_L` du snapshot, puis mettre à jour exactement une fois ses composantes préexistantes ;
    8. normaliser le compartiment géométrique selon le §4.4 ;
    9. si la `LAYER` est terminale, que son contexte était émissible, qu'aucun successeur n'existait et que `β>0`, former une demande de nouvelle `LAYER` ;
-5. en mode `temporal`, après la phase géométrique complète, pour chaque `LAYER` qui existait au début du pas :
+5. en modes `temporal` et `predictive`, après la phase géométrique complète, pour chaque `LAYER` qui existait au début du pas :
    1. prendre le registre `P_k` du snapshot de pas et le noyau géométrique `H_{L_k,t}^{\uparrow}` produit à ce pas, éventuellement absents ;
-   2. si les deux existent, construire `\mathcal P_{k,t}^T` selon le §5.9 ;
-   3. si cette présentation existe, figer le snapshot temporel associé, appliquer `CONCERN/ALLOCATE`, produire les reconnaissances de `\mathcal S_t`, mettre à jour exactement une fois les `CELL` temporelles et `Σ_k^T`, puis normaliser ce compartiment selon les §3 et §4 ;
-   4. remplacer `P_k` par le noyau courant ou par `∅` selon le §5.9 ;
+   2. figer le snapshot des `CELL` temporelles préexistantes ; en mode `predictive`, si le contexte courant existe, produire `\mathcal Q_t` depuis ce snapshot selon le §5.12 ;
+   3. si `P_k` et le contexte courant existent, construire `\mathcal P_{k,t}^T` selon le §5.9 ;
+   4. si cette présentation existe, appliquer `CONCERN/ALLOCATE` depuis le même snapshot temporel, produire les reconnaissances de `\mathcal S_t`, mettre à jour exactement une fois les `CELL` temporelles et `Σ_k^T`, puis normaliser ce compartiment selon les §3 et §4 ;
+   5. remplacer `P_k` par le noyau courant ou par `∅` selon le §5.9 ;
 6. réunir tous les seeds géométriques survivants, tous les seeds temporels survivants et l'éventuelle demande de `LAYER` en une transaction globale de croissance (§7.3) ;
 7. exécuter cette transaction entière si elle est payable, sinon ne rien créer ;
-8. créer, pour toute nouvelle `LAYER` admise en mode `temporal`, son compartiment temporel vide et son registre `P_k=∅` sans lui faire lire le pas courant ;
+8. créer, pour toute nouvelle `LAYER` admise en modes `temporal` ou `predictive`, son compartiment temporel vide et son registre `P_k=∅` sans lui faire lire le pas courant ni prédire ;
 9. terminer la matérialisation du `readout` selon le mode, puis retourner le `readout` et l'état post-pas.
 
-La phase temporelle ne peut modifier aucune reconnaissance géométrique du même pas. La phase géométrique ne lit aucun état temporel. Leur seul raccord causal est la construction par le `NETWORK` de `\mathcal P_{k,t}^T` depuis deux contextes géométriques successifs.
+La phase temporelle ne peut modifier aucune reconnaissance géométrique du même pas. La phase géométrique ne lit aucun état temporel. Leur seul raccord causal apprenant est la construction par le `NETWORK` de `\mathcal P_{k,t}^T` depuis deux contextes géométriques successifs. En mode `predictive`, la projection du §5.12 est une lecture supplémentaire unidirectionnelle du snapshot temporel vers le `readout` seulement.
 
 ---
 
@@ -1141,7 +1242,7 @@ Une composante de `Σ_L` et une `CELL` géométrique occupent `U_H`. Une composa
 
 Le header logique du `NETWORK` contient :
 
-- `format_version=3`, `dimension`, `steps_seen`, `layer_count` sur `u64` ;
+- `format_version=4`, `dimension`, `steps_seen`, `layer_count` sur `u64` ;
 - un tag `scalar` ;
 - un tag `mode` ;
 - `memory`, `eta` dans le format persistant.
@@ -1158,7 +1259,7 @@ En mode `geometry`, chaque `LAYER` possède deux compteurs `u64` :
 \boxed{U_L^G=16.}
 \]
 
-En mode `temporal`, chaque `LAYER` possède :
+En modes `temporal` et `predictive`, chaque `LAYER` possède :
 
 - quatre compteurs `u64` pour `Σ_L`, `CELL`, `Σ_k^T`, `CELL^T` ;
 - un tag de présence du registre `P_k` ;
@@ -1186,7 +1287,7 @@ U_N+
 }
 \]
 
-En mode `temporal` :
+En modes `temporal` et `predictive` :
 
 \[
 \boxed{
@@ -1202,7 +1303,7 @@ U_L^T
 }
 \]
 
-Le contexte vertical, les présentations temporelles et le `readout` sont éphémères et ne possèdent aucun coût persistant propre.
+Le contexte vertical, les présentations temporelles, les projections prédictives et le `readout` sont éphémères et ne possèdent aucun coût persistant propre. Le mode `predictive` a donc exactement la même empreinte matérielle persistante que `temporal` pour un état de connaissance identique.
 
 La promotion `Σ→CELL`, dans l'un ou l'autre espace, conserve exactement le même payload. Son coût marginal est donc :
 
@@ -1229,7 +1330,7 @@ Une nouvelle `LAYER` vide coûte :
 c_{layer}=
 \begin{cases}
 U_L^G,&mode=\texttt{geometry},\\
-U_L^T,&mode=\texttt{temporal}.
+U_L^T,&mode\in\{\texttt{temporal},\texttt{predictive}\}.
 \end{cases}
 }
 \]
@@ -1241,7 +1342,7 @@ L'état minimal exécutable est `NETWORK + L0` vide :
 M_{min}=
 \begin{cases}
 U_N+U_L^G,&mode=\texttt{geometry},\\
-U_N+U_L^T,&mode=\texttt{temporal}.
+U_N+U_L^T,&mode\in\{\texttt{temporal},\texttt{predictive}\}.
 \end{cases}
 }
 \]
@@ -1254,10 +1355,10 @@ Une interface peut exprimer ergonomiquement le budget en unités de noyau, mais 
 
 Les promotions du §4.4 sont géométriques et matériellement neutres ; elles sont appliquées avant toute création matérielle.
 
-Après lecture géométrique et, en mode `temporal`, temporelle du pas, réunir :
+Après lecture géométrique et, en modes `temporal` et `predictive`, temporelle du pas, réunir :
 
 - toutes les demandes de nouveaux noyaux `Σ_L` encore admissibles du §4.4 ;
-- en mode `temporal`, toutes les demandes de nouveaux noyaux `Σ_k^T` encore admissibles ;
+- en modes `temporal` et `predictive`, toutes les demandes de nouveaux noyaux `Σ_k^T` encore admissibles ;
 - l'éventuelle nouvelle `LAYER` de frontière requise par le §5.7.
 
 Notons `Π_p` la projection atomique vers le format scalaire persistant du §8.1. Pour chaque demande de seed `H_s`, former :
@@ -1300,7 +1401,7 @@ M_{units}(\mathcal A)>B_{units},
 
 alors :
 
-1. vider simultanément toutes les mémoires `Σ_L` et, en mode `temporal`, toutes les mémoires `Σ_k^T` ;
+1. vider simultanément toutes les mémoires `Σ_L` et, en modes `temporal` et `predictive`, toutes les mémoires `Σ_k^T` ;
 2. supprimer toute `LAYER` terminale sans aucune `CELL` géométrique ni temporelle, sans jamais supprimer `L0` ;
 3. si l'état reste insolvable, considérer ensemble les valeurs distinctes `K_i` de toutes les `CELL` géométriques et temporelles restantes et, pour chaque valeur `k`, l'état `\mathcal A_{>k}` obtenu en conservant exactement les `CELL` des deux espaces telles que `K_i>k`, puis en supprimant les `LAYER` terminales devenues sans connaissance ;
 4. s'il existe un `k` tel que `M_{units}(\mathcal A_{>k})\le B_{units}`, choisir le plus petit et remplacer l'état par `\mathcal A_{>k}` ;
@@ -1372,7 +1473,10 @@ Toute réalisation conforme préserve :
 19. absence de récursion `T(T(E))` ;
 20. même changement d'échelle uniforme dans les deux extrémités temporelles, avec `V^T→a²V^T` ;
 21. même rotation orthogonale appliquée aux deux extrémités temporelles ;
-22. même économie de contraction pour des `CELL` de valeur `K` égale, quel que soit leur espace.
+22. même économie de contraction pour des `CELL` de valeur `K` égale, quel que soit leur espace ;
+23. la projection prédictive commute avec tout changement d'échelle uniforme non nul ;
+24. la projection prédictive commute avec toute rotation orthogonale appliquée simultanément au présent, à la source et au successeur ;
+25. une dispersion temporelle différente à centre temporel identique ne modifie pas la lecture prédictive.
 
 L'origine `0` est sémantique ; une translation uniforme n'est donc pas une invariance exigée.
 
@@ -1384,7 +1488,7 @@ Deux contextes distincts ayant exactement le même quotient `(W,C,V)` sont cogni
 
 Deux successions distinctes ayant exactement le même quotient `(W_-W_+,C_-⊕C_+,V_-+V_+)` sont de même cognitivement indistinguables pour l'espace temporel. La dispersion temporelle n'est pas décomposable en dispersions d'extrémité.
 
-Une succession dont les deux centres valent exactement zéro possède un centre temporel nul et reste silencieuse.
+Une succession dont les deux centres valent exactement zéro possède un centre temporel nul et reste silencieuse. En mode `predictive`, une source temporelle projetée exactement nulle reste également silencieuse, tandis qu'une cible projetée nulle peut être émise explicitement.
 
 ### 8.1 Calcul numérique
 
@@ -1410,7 +1514,7 @@ Un index géométrique peut réduire les candidats aux concernements publics et 
 
 La construction du contexte peut être incrémentale, mais elle doit être exactement équivalente à la fusion commutative des contributions du §5.1.
 
-Une décroissance différée doit distinguer l'horloge de chaque espace effectivement présenté. En mode `temporal`, une présentation géométrique sans présentation temporelle ne fait pas vieillir les mémoires temporelles associées.
+Une décroissance différée doit distinguer l'horloge de chaque espace effectivement présenté. En modes `temporal` et `predictive`, une présentation géométrique sans présentation temporelle ne fait pas vieillir les mémoires temporelles associées. Une lecture prédictive seule ne fait jamais avancer leur horloge.
 
 Une présentation reste un événement causal unique quelle que soit sa réalisation physique.
 
@@ -1423,14 +1527,14 @@ L'état persistant est minimal.
 ### 9.1 NETWORK
 
 - ordre des `LAYER` ;
-- `format_version=3` administratif ;
+- `format_version=4` administratif ;
 - `dimension` ;
 - `scalar∈{f32,f64}` ;
 - `memory` ;
 - `eta` ;
-- `mode∈{geometry,temporal}` ;
+- `mode∈{geometry,temporal,predictive}` ;
 - compteur de présentations achevées ;
-- en mode `temporal`, un registre `P_k` présent ou absent pour chaque `LAYER`.
+- en modes `temporal` et `predictive`, un registre `P_k` présent ou absent pour chaque `LAYER`.
 
 Le budget appartient à l'environnement matériel et n'est pas une connaissance apprise.
 
@@ -1445,7 +1549,7 @@ Toujours :
 - `Σ_L`, population finie de noyaux `(W,C,V)` en dimension `D` ;
 - population de `CELL` géométriques.
 
-En mode `temporal`, le `NETWORK` entretient en outre, structurellement associé à cette `LAYER` :
+En modes `temporal` et `predictive`, le `NETWORK` entretient en outre, structurellement associé à cette `LAYER` :
 
 - `Σ_k^T`, population finie de noyaux `(W,C,V)` en dimension `2D` ;
 - population de `CELL` temporelles.
@@ -1473,6 +1577,7 @@ Aucune autre mémoire cognitive n'est requise.
 Ne sont notamment pas persistés :
 
 - présentations géométriques ou temporelles courantes ;
+- projections et sorties prédictives courantes ;
 - responsabilités ;
 - ensembles `R_s` ;
 - noyaux de contexte `H_L^{\uparrow}` du pas courant après transfert éventuel dans `P_k` ;
@@ -1513,7 +1618,7 @@ inconnu
 → CELL géométrique locale
 ```
 
-En mode `temporal`, le `NETWORK` ajoute strictement :
+En modes `temporal` et `predictive`, le `NETWORK` ajoute strictement :
 
 ```text
 contexte reconnu à step-1
@@ -1525,7 +1630,17 @@ contexte reconnu à step-1
 → CELL temporelle
 ```
 
-La croissance horizontale, la croissance verticale et l'apprentissage temporel sont donc distincts :
+En mode `predictive`, le `NETWORK` ajoute ensuite, sans apprentissage :
+
+```text
+contexte reconnu à step
++ projection source d'une CELL temporelle préexistante
+→ CONCERN ponctuel
+→ projection successeur
+→ readout prédictif de step+1 possible
+```
+
+La croissance horizontale, la croissance verticale, l'apprentissage temporel et la lecture prédictive sont donc distincts :
 
 \[
 \boxed{
@@ -1551,6 +1666,14 @@ H_{k,t-1}^{\uparrow},H_{k,t}^{\uparrow}
 }
 \]
 
+\[
+\boxed{
+C_{k,t}^{\uparrow},\ C_{j,-}^T\oplus C_{j,+}^T
+\longrightarrow
+C_{j,+}^T\text{ si }C_{j,-}^T\text{ concerne ponctuellement }C_{k,t}^{\uparrow}.
+}
+\]
+
 Les quatre primitives cognitives nommées restent :
 
 ```text
@@ -1560,10 +1683,10 @@ DETECT
 CONTEXT
 ```
 
-`CONCERN` et `ALLOCATE` utilisent l'unique primitive de population du §2.4. `DETECT` applique cette même géométrie privément à `Σ`, dans `E` comme dans `T(E)`. `CONTEXT` fusionne uniquement les valeurs géométriques reconnues pour la récursion verticale. La construction du noyau temporel est une responsabilité structurelle du `NETWORK`, pas une cinquième loi cognitive.
+`CONCERN` et `ALLOCATE` utilisent l'unique primitive de population du §2.4. `DETECT` applique cette même géométrie privément à `Σ`, dans `E` comme dans `T(E)`. `CONTEXT` fusionne uniquement les valeurs géométriques reconnues pour la récursion verticale. La construction du noyau temporel et la projection prédictive sont des responsabilités structurelles du `NETWORK`, pas de nouvelles lois cognitives.
 
-Une abstraction supérieure est une régularité récurrente du contexte compact des connaissances déjà reconnues par l'étage précédent. Une connaissance temporelle est une régularité récurrente entre deux de ces contextes strictement adjacents. Elle ne possède ni histoire plus profonde, ni pointeur vers ses extrémités conceptuelles, ni autorité verticale.
+Une abstraction supérieure est une régularité récurrente du contexte compact des connaissances déjà reconnues par l'étage précédent. Une connaissance temporelle est une régularité récurrente entre deux de ces contextes strictement adjacents. Elle ne possède ni histoire plus profonde, ni pointeur vers ses extrémités conceptuelles, ni autorité verticale. En mode `predictive`, sa projection gauche peut seulement servir de clé géométrique ponctuelle pour exposer sa projection droite comme futur connu possible.
 
-En mode `temporal`, le `readout` réunit sans les mélanger le contexte géométrique du pas et le contexte de succession reconnu entre le pas précédent et le pas courant. Cette réunion est externe et éphémère.
+En mode `temporal`, le `readout` réunit sans les mélanger le contexte géométrique du pas et le contexte de succession reconnu entre le pas précédent et le pas courant. En mode `predictive`, il y ajoute les successeurs possibles lus depuis le présent reconnu. Ces réunions sont externes et éphémères.
 
 La géométrie détermine les connaissances présentes, les concernements et les créations admissibles. Le `NETWORK` observe l'ordre causal des pas. L'économie maintient un état fini sans sélectionner arbitrairement entre créations simultanées. Une connaissance acquise persiste indépendamment de son actualité et ne peut être perdue que lorsqu'une contraction matérielle est obligatoire, selon sa valeur géométrique intrinsèque.

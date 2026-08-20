@@ -1,4 +1,4 @@
-"""Deterministic external worlds for the Auxein v0.3.0 laboratory.
+"""Deterministic external worlds for the Auxein v0.4.0 laboratory.
 
 Worlds never inspect Auxein.  They emit one logical external presentation per
 step and optional truth used only by diagnostics.

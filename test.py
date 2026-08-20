@@ -329,7 +329,7 @@ class CanonTests(unittest.TestCase):
 
     def test_f32_projected_seed_is_revalidated_before_persistence(self) -> None:
         state = {
-            "format_version": 3,
+            "format_version": 4,
             "dimension": 2,
             "scalar": "f32",
             "memory": 1.0,
@@ -454,8 +454,10 @@ class CanonTests(unittest.TestCase):
         n = self.make()
         self.assertEqual(n.mode, "geometry")
         self.assertEqual(n.export_state()["mode"], "geometry")
+        self.assertEqual(self.make(mode="temporal").mode, "temporal")
+        self.assertEqual(self.make(mode="predictive").mode, "predictive")
         with self.assertRaises(ValueError):
-            self.make(mode="predictive")
+            self.make(mode="future")
 
     def test_temporal_readout_recognises_adjacent_order(self) -> None:
         n = self.make(mode="temporal", eta=0.0, universe="lab")
@@ -472,6 +474,131 @@ class CanonTests(unittest.TestCase):
         )
         third = n.step([[1.0]])
         self.assertEqual(third["readout"]["sequences"], [])
+
+
+    def test_predictive_reads_temporal_cell_from_current_context(self) -> None:
+        n = self.make(mode="predictive", eta=0.0, universe="lab")
+        n.layers[0].cells = [Kernel(1.0, (1.0,), 0.0), Kernel(1.0, (5.0,), 0.0)]
+        n.layers[0].temporal_cells = [Kernel(1.0, (1.0, 5.0), 123.0)]
+
+        first = n.step([[0.9]])
+        self.assertEqual(first["readout"]["sequences"], [])
+        self.assertEqual(
+            first["readout"]["predictions"],
+            [["lab", [1.0], [1.0], [5.0]]],
+        )
+        second = n.step([[5.0]])
+        self.assertEqual(second["readout"]["predictions"], [])
+
+    def test_predictive_branching_emits_all_concerned_futures(self) -> None:
+        n = self.make(mode="predictive", eta=0.0, universe="branch")
+        n.layers[0].cells = [Kernel(1.0, (1.0,), 0.0)]
+        n.layers[0].temporal_cells = [
+            Kernel(1.0, (1.0, 3.0), 0.0),
+            Kernel(1.0, (1.0, 7.0), 0.0),
+            Kernel(1.0, (3.0, 9.0), 0.0),  # must not chain A->3->9
+        ]
+        report = n.step([[1.0]])
+        self.assertEqual(
+            report["readout"]["predictions"],
+            [
+                ["branch", [1.0], [1.0], [3.0]],
+                ["branch", [1.0], [1.0], [7.0]],
+            ],
+        )
+
+    def test_predictive_zero_source_is_silent_but_zero_target_is_explicit(self) -> None:
+        n = self.make(mode="predictive", eta=0.0, universe="zero")
+        n.layers[0].cells = [Kernel(1.0, (1.0,), 0.0)]
+        n.layers[0].temporal_cells = [
+            Kernel(1.0, (0.0, 4.0), 0.0),
+            Kernel(1.0, (1.0, 0.0), 0.0),
+        ]
+        report = n.step([[1.0]])
+        self.assertEqual(
+            report["readout"]["predictions"],
+            [["zero", [1.0], [1.0], [0.0]]],
+        )
+
+    def test_predictive_new_temporal_cell_has_authority_next_step_only(self) -> None:
+        n = self.make(mode="predictive", eta=1.0, budget=1000, universe="causal")
+        n.layers[0].cells = [Kernel(1.0, (1.0,), 0.0)]
+        n.step([[1.0]])
+        second = n.step([[1.0]])  # seed A->A
+        self.assertEqual(second["readout"]["predictions"], [])
+        third = n.step([[1.0]])   # recurrence promotes A->A
+        self.assertEqual(third["readout"]["predictions"], [])
+        self.assertTrue(n.layers[0].temporal_cells)
+        fourth = n.step([[1.0]])
+        self.assertEqual(
+            fourth["readout"]["predictions"],
+            [["causal", [1.0], [1.0], [1.0]]],
+        )
+
+    def test_predictive_and_temporal_have_identical_persistent_trajectory(self) -> None:
+        temporal = self.make(mode="temporal", budget=10000)
+        predictive = self.make(mode="predictive", budget=10000)
+        seq = [[[1.0]], [[5.0]], [[1.0]], [[5.0]], [[1.0], [5.0]]] * 5
+        for presentation in seq:
+            temporal.step(presentation)
+            predictive.step(presentation)
+        state_t = temporal.export_state()
+        state_p = predictive.export_state()
+        self.assertEqual(state_t["layers"], state_p["layers"])
+        self.assertEqual(temporal.maintenance_units(), predictive.maintenance_units())
+
+    def test_predictive_scale_and_signed_orthogonal_invariance(self) -> None:
+        def prediction(net: Auxein, current: list[float]) -> list[object]:
+            out = net.step([current])["readout"]
+            self.assertIsInstance(out, dict)
+            assert isinstance(out, dict)
+            self.assertEqual(len(out["predictions"]), 1)
+            return out["predictions"][0]
+
+        base = Auxein(
+            dimension=2, memory=10.0, eta=0.0, scalar="f64",
+            mode="predictive", budget=100, universe="u",
+        )
+        base.layers[0].cells = [Kernel(1.0, (1.0, 0.0), 0.0)]
+        base.layers[0].temporal_cells = [Kernel(1.0, (0.9, 0.1, 0.0, 2.0), 77.0)]
+        p = prediction(base, [1.0, 0.0])
+
+        scaled = Auxein(
+            dimension=2, memory=10.0, eta=0.0, scalar="f64",
+            mode="predictive", budget=100, universe="u",
+        )
+        scaled.layers[0].cells = [Kernel(1.0, (10.0, 0.0), 0.0)]
+        scaled.layers[0].temporal_cells = [Kernel(1.0, (9.0, 1.0, 0.0, 20.0), 7700.0)]
+        ps = prediction(scaled, [10.0, 0.0])
+        self.assertEqual(ps[0], p[0])
+        for original, transformed in zip(p[1:], ps[1:], strict=True):
+            self.assertEqual([10.0 * x for x in original], transformed)
+
+        rotated = Auxein(
+            dimension=2, memory=10.0, eta=0.0, scalar="f64",
+            mode="predictive", budget=100, universe="u",
+        )
+        # Q(x,y)=(-y,x), a signed orthogonal permutation.
+        rotated.layers[0].cells = [Kernel(1.0, (0.0, 1.0), 0.0)]
+        rotated.layers[0].temporal_cells = [Kernel(1.0, (-0.1, 0.9, -2.0, 0.0), 77.0)]
+        pr = prediction(rotated, [0.0, 1.0])
+        self.assertEqual(pr[0], p[0])
+        for original, transformed in zip(p[1:], pr[1:], strict=True):
+            self.assertEqual([-original[1], original[0]], transformed)
+
+    def test_predictive_roundtrip_preserves_mode_and_temporal_state(self) -> None:
+        n = self.make(mode="predictive", eta=0.0, universe="roundtrip")
+        n.layers[0].cells = [Kernel(1.0, (1.0,), 0.0)]
+        n.layers[0].temporal_cells = [Kernel(1.0, (1.0, 2.0), 0.0)]
+        state = n.export_state()
+        self.assertEqual(state["format_version"], 4)
+        restored = Auxein.from_state(state, budget_units=n.budget_units, universe=n.universe)
+        self.assertEqual(restored.mode, "predictive")
+        self.assertEqual(restored.export_state(), state)
+        self.assertEqual(
+            restored.step([[1.0]])["readout"]["predictions"],
+            [["roundtrip", [1.0], [1.0], [2.0]]],
+        )
 
     def test_temporal_recurrence_promotes_only_after_recurrence(self) -> None:
         n = self.make(mode="temporal", budget=1000)

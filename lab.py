@@ -1,7 +1,7 @@
-"""Small deterministic laboratory for the Auxein v0.3.0 canon.
+"""Small deterministic laboratory for the Auxein v0.4.0 canon.
 
 Experiment JSON files describe only external worlds and execution parameters.
-The laboratory records geometric context, local recurrence, temporal recurrence,
+The laboratory records geometric context, local recurrence, temporal recurrence, predictive projection,
 readout and material growth. Diagnostic truth never enters Auxein.
 """
 
@@ -26,15 +26,20 @@ def read_json(path: Path) -> Mapping[str, object]:
     return value
 
 
-def _readout_counts(readout: object) -> tuple[int, int]:
+def _readout_counts(readout: object) -> tuple[int, int, int]:
     if isinstance(readout, list):
-        return len(readout), 0
+        return len(readout), 0, 0
     if isinstance(readout, Mapping):
         concepts = readout.get("concepts")
         sequences = readout.get("sequences")
-        if not isinstance(concepts, list) or not isinstance(sequences, list):
-            raise ValueError("temporal readout must contain concepts and sequences lists")
-        return len(concepts), len(sequences)
+        predictions = readout.get("predictions", [])
+        if (
+            not isinstance(concepts, list)
+            or not isinstance(sequences, list)
+            or not isinstance(predictions, list)
+        ):
+            raise ValueError("typed readout must contain list fields")
+        return len(concepts), len(sequences), len(predictions)
     raise ValueError("invalid readout")
 
 
@@ -126,7 +131,36 @@ class OracleDecoder:
                 tuple(str(x) for x in item["recognised"]),
             )
         )
-        return {"concepts": concepts, "sequences": sequences}
+
+        result: dict[str, object] = {"concepts": concepts, "sequences": sequences}
+        raw_predictions = readout.get("predictions")
+        if raw_predictions is not None:
+            if not isinstance(raw_predictions, list):
+                raise ValueError("predictions must be a list")
+            predictions: list[dict[str, object]] = []
+            for item in raw_predictions:
+                if not isinstance(item, list) or len(item) != 4:
+                    raise ValueError("invalid prediction readout item")
+                current = self.decode_vector(item[1])
+                source = self.decode_vector(item[2])
+                predicted = self.decode_vector(item[3])
+                predictions.append({
+                    "current": current["label"],
+                    "source": source["label"],
+                    "predicted": predicted["label"],
+                    "current_distance2": current["distance2"],
+                    "source_distance2": source["distance2"],
+                    "predicted_distance2": predicted["distance2"],
+                })
+            predictions.sort(
+                key=lambda item: (
+                    str(item["current"]),
+                    str(item["source"]),
+                    str(item["predicted"]),
+                )
+            )
+            result["predictions"] = predictions
+        return result
 
     @staticmethod
     def semantic(decoded: Mapping[str, object]) -> dict[str, object]:
@@ -134,7 +168,7 @@ class OracleDecoder:
         sequences = decoded.get("sequences")
         if not isinstance(concepts, list) or not isinstance(sequences, list):
             raise ValueError("invalid decoded oracle readout")
-        return {
+        out: dict[str, object] = {
             "concepts": [
                 {"input": item["input"], "recognised": item["recognised"]}
                 for item in concepts
@@ -144,6 +178,19 @@ class OracleDecoder:
                 for item in sequences
             ],
         }
+        predictions = decoded.get("predictions")
+        if predictions is not None:
+            if not isinstance(predictions, list):
+                raise ValueError("invalid decoded predictions")
+            out["predictions"] = [
+                {
+                    "current": item["current"],
+                    "source": item["source"],
+                    "predicted": item["predicted"],
+                }
+                for item in predictions
+            ]
+        return out
 
     def decode_final_state(
         self, state: Mapping[str, object], *, dimension: int, layer_index: int
@@ -157,7 +204,7 @@ class OracleDecoder:
         raw_cells = layer.get("cells")
         raw_temporal = layer.get("temporal_cells")
         if not isinstance(raw_cells, list) or not isinstance(raw_temporal, list):
-            raise ValueError("oracle requires v0.3 temporal layer state")
+            raise ValueError("oracle requires temporal layer state")
 
         concepts: list[str | None] = []
         for cell in raw_cells:
@@ -206,6 +253,7 @@ def run_experiment(spec: Mapping[str, object]) -> dict[str, object]:
     temporal_unknown_atoms = 0
     concept_readout_items = 0
     sequence_readout_items = 0
+    prediction_readout_items = 0
     phase_results: list[dict[str, object]] = []
     seed_base = int(spec.get("seed", 0))
     oracle_spec = spec.get("oracle")
@@ -249,15 +297,18 @@ def run_experiment(spec: Mapping[str, object]) -> dict[str, object]:
         local_context = 0
         local_concepts = 0
         local_sequences = 0
+        local_predictions = 0
         local_oracle_checks: list[dict[str, object]] = []
         for step in range(steps):
             sample = world.sample(step)
             report = network.step(sample.presentation, detailed_report=True)
-            concept_count, sequence_count = _readout_counts(report["readout"])
+            concept_count, sequence_count, prediction_count = _readout_counts(report["readout"])
             concept_readout_items += concept_count
             sequence_readout_items += sequence_count
+            prediction_readout_items += prediction_count
             local_concepts += concept_count
             local_sequences += sequence_count
+            local_predictions += prediction_count
             for transform in report["transformations"]:
                 transformations[f"{transform['phase']}:{transform['type']}"] += 1
             for layer in report["layer_reports"]:
@@ -297,6 +348,7 @@ def run_experiment(spec: Mapping[str, object]) -> dict[str, object]:
                 "context_emissions": local_context,
                 "concept_readout_items": local_concepts,
                 "sequence_readout_items": local_sequences,
+                "prediction_readout_items": local_predictions,
                 "before": start_summary,
                 "after": network.summary(),
                 "oracle_checks": local_oracle_checks,
@@ -339,9 +391,10 @@ def run_experiment(spec: Mapping[str, object]) -> dict[str, object]:
         "description": str(spec.get("description", "")),
         "mode": network.mode,
         "context_emissions": context_emissions,
-        "readout_items": concept_readout_items + sequence_readout_items,
+        "readout_items": concept_readout_items + sequence_readout_items + prediction_readout_items,
         "concept_readout_items": concept_readout_items,
         "sequence_readout_items": sequence_readout_items,
+        "prediction_readout_items": prediction_readout_items,
         "recognised_atoms": recognised_atoms,
         "unknown_atoms": unknown_atoms,
         "temporal_recognised_atoms": temporal_recognised_atoms,
@@ -366,7 +419,7 @@ def main() -> None:
     oracle_experiments = [r for r in results if r.get("oracle") is not None]
     oracle_passed = all(bool(r["oracle"]["passed"]) for r in oracle_experiments)
     out = {
-        "canon": "0.3.0",
+        "canon": "0.4.0",
         "experiment_count": len(results),
         "oracle_experiment_count": len(oracle_experiments),
         "oracle_passed": oracle_passed,

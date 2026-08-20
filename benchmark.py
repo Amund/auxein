@@ -1,4 +1,4 @@
-"""Stdlib-only benchmark harness for the Auxein v0.3.0 canon."""
+"""Stdlib-only benchmark harness for the Auxein v0.4.0 canon."""
 
 from __future__ import annotations
 
@@ -30,6 +30,15 @@ def make_network(
     if scenario == "temporal-stable":
         if mode != "temporal":
             raise ValueError("temporal-stable requires --mode temporal")
+        center = [0.0] * dimension
+        center[0] = 2.0
+        c = tuple(center)
+        network.layers[0].cells = [Kernel(1.0, c, 0.25)]
+        network.layers[0].temporal_cells = [Kernel(1.0, c + c, 0.5)]
+        return network, [center]
+    if scenario == "predictive-stable":
+        if mode != "predictive":
+            raise ValueError("predictive-stable requires --mode predictive")
         center = [0.0] * dimension
         center[0] = 2.0
         c = tuple(center)
@@ -96,10 +105,13 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--scenario",
-        choices=["singleton", "temporal-stable", "pair-context", "sparse", "dense"],
+        choices=[
+            "singleton", "temporal-stable", "predictive-stable",
+            "pair-context", "sparse", "dense"
+        ],
         default="singleton",
     )
-    parser.add_argument("--mode", choices=["geometry", "temporal"], default="geometry")
+    parser.add_argument("--mode", choices=["geometry", "temporal", "predictive"], default="geometry")
     parser.add_argument("--dimension", type=int, default=8)
     parser.add_argument("--cells", type=int, default=512)
     parser.add_argument("--steps", type=int, default=10000)
@@ -121,7 +133,7 @@ def main() -> None:
     print(
         json.dumps(
             {
-                "canon": "0.3.0",
+                "canon": "0.4.0",
                 "mode": args.mode,
                 "scenario": args.scenario,
                 "dimension": args.dimension,

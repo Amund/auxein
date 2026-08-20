@@ -1,15 +1,16 @@
-"""Auxein v0.3.0 reference implementation.
+"""Auxein v0.4.0 reference implementation.
 
 This module implements ``spec/auxein.md`` using only the Python standard
-library.  Geometry mode is the canonical centered-kernel recursion. Temporal
-mode keeps that geometry unchanged and adds, for each layer, an independent
+library.  Geometry mode is the canonical centered-kernel recursion. Temporal mode keeps that geometry unchanged and adds, for each layer, an independent
 ``E⊕E`` population learning only adjacent ``step-1 -> step`` context pairs.
+Predictive mode keeps both unchanged and adds a read-only projection of existing
+temporal CELLs from recognised present context to candidate ``step+1`` contexts.
 
 Persistent cognitive state remains deliberately small:
 
     NETWORK -> ordered LAYERs
                  |- geometric {CELL, Sigma}
-                 `- temporal  {CELL, Sigma, previous context}  [temporal mode]
+                 `- temporal  {CELL, Sigma, previous context}  [temporal/predictive]
 
 Contexts, responsibilities, current presentations and readouts are ephemeral.
 """
@@ -24,13 +25,14 @@ from numbers import Real
 from typing import Iterable, Mapping, Sequence
 
 
-FORMAT_VERSION = 3
+FORMAT_VERSION = 4
 SCALARS = {"f32": 4, "f64": 8}
-MODES = {"geometry", "temporal"}
+MODES = {"geometry", "temporal", "predictive"}
 
 Vector = tuple[float, ...]
 Recognition = tuple[str, Vector, Vector]
 TemporalRecognition = tuple[str, tuple[Vector, Vector], tuple[Vector, Vector]]
+Prediction = tuple[str, Vector, Vector, Vector]
 
 
 # ---------------------------------------------------------------------------
@@ -62,7 +64,7 @@ def _eta(value: object) -> float:
 
 def _mode(value: object) -> str:
     if not isinstance(value, str) or value not in MODES:
-        raise ValueError("mode must be 'geometry' or 'temporal'")
+        raise ValueError("mode must be 'geometry', 'temporal' or 'predictive'")
     return value
 
 
@@ -338,7 +340,7 @@ class _LayerResult:
 
 
 class Auxein:
-    """Reference Auxein v0.3.0 network."""
+    """Reference Auxein v0.4.0 network."""
 
     def __init__(
         self,
@@ -463,7 +465,7 @@ class Auxein:
                 "sigma": [self._kernel_state(k) for k in layer.sigma],
                 "cells": [self._kernel_state(k) for k in layer.cells],
             }
-            if self.mode == "temporal":
+            if self.mode != "geometry":
                 payload.update({
                     "temporal_sigma": [self._kernel_state(k) for k in layer.temporal_sigma],
                     "temporal_cells": [self._kernel_state(k) for k in layer.temporal_cells],
@@ -541,7 +543,7 @@ class Auxein:
             cells = network._load_kernel_list(
                 raw_layer["cells"], f"state.layers[{li}].cells", network.dimension
             )
-            if mode == "temporal":
+            if mode != "geometry":
                 temporal_sigma = network._load_kernel_list(
                     raw_layer["temporal_sigma"],
                     f"state.layers[{li}].temporal_sigma",
@@ -613,7 +615,7 @@ class Auxein:
             raise ValueError("network must contain L0")
         for li, layer in enumerate(self.layers):
             self._validate_compartment(layer.cells, layer.sigma, f"layers[{li}]")
-            if self.mode == "temporal":
+            if self.mode != "geometry":
                 self._validate_compartment(
                     layer.temporal_cells, layer.temporal_sigma, f"layers[{li}].temporal"
                 )
@@ -660,12 +662,12 @@ class Auxein:
         return self.network_units + self.layer_units * len(self.layers) + payload_units
 
     def _invalidate_previous(self) -> None:
-        if self.mode == "temporal":
+        if self.mode != "geometry":
             for layer in self.layers:
                 layer.previous = None
 
     def _layer_has_cells(self, layer: Layer) -> bool:
-        return bool(layer.cells or (self.mode == "temporal" and layer.temporal_cells))
+        return bool(layer.cells or (self.mode != "geometry" and layer.temporal_cells))
 
     def _force_solvency(self, transformations: list[dict[str, object]]) -> None:
         if self.maintenance_units() <= self.budget_units:
@@ -674,13 +676,13 @@ class Auxein:
         # Work in progress is discarded as one simultaneous wave in both spaces.
         removed_sigma = sum(
             len(layer.sigma)
-            + (len(layer.temporal_sigma) if self.mode == "temporal" else 0)
+            + (len(layer.temporal_sigma) if self.mode != "geometry" else 0)
             for layer in self.layers
         )
         if removed_sigma:
             for layer in self.layers:
                 layer.sigma.clear()
-                if self.mode == "temporal":
+                if self.mode != "geometry":
                     layer.temporal_sigma.clear()
             transformations.append({
                 "phase": "solvency", "type": "clear_sigma", "count": removed_sigma
@@ -705,7 +707,7 @@ class Auxein:
         t_counts = [len(layer.temporal_cells) for layer in self.layers]
         for li, layer in enumerate(self.layers):
             valued.extend((self.cell_value(cell), li, "geometry", cell) for cell in layer.cells)
-            if self.mode == "temporal":
+            if self.mode != "geometry":
                 valued.extend(
                     (self.cell_value(cell), li, "temporal", cell)
                     for cell in layer.temporal_cells
@@ -742,7 +744,7 @@ class Auxein:
                 active_layers -= 1
             simulated_units = self.network_units + self.layer_units * active_layers
             simulated_units += sum(g_counts[:active_layers]) * self.kernel_units
-            if self.mode == "temporal":
+            if self.mode != "geometry":
                 simulated_units += sum(t_counts[:active_layers]) * self.temporal_kernel_units
             cutoff = k
             if simulated_units <= self.budget_units:
@@ -755,7 +757,7 @@ class Auxein:
         assert cutoff is not None
         for layer in self.layers:
             layer.cells = [cell for cell in layer.cells if self.cell_value(cell) > cutoff]
-            if self.mode == "temporal":
+            if self.mode != "geometry":
                 layer.temporal_cells = [
                     cell for cell in layer.temporal_cells if self.cell_value(cell) > cutoff
                 ]
@@ -1153,6 +1155,46 @@ class Auxein:
     def _split_temporal(self, center: Vector) -> tuple[Vector, Vector]:
         return center[: self.dimension], center[self.dimension :]
 
+    @staticmethod
+    def _point_concern(a: Vector, b: Vector) -> bool:
+        """Canonical point/point CONCERN with symmetric extreme scaling."""
+        a2 = _norm2(a)
+        b2 = _norm2(b)
+        a_extreme = (not math.isfinite(a2)) or (a2 == 0.0 and not _zero(a))
+        b_extreme = (not math.isfinite(b2)) or (b2 == 0.0 and not _zero(b))
+        if a_extreme or b_extreme:
+            scale = max(
+                max((abs(x) for x in a), default=0.0),
+                max((abs(x) for x in b), default=0.0),
+            )
+            if scale == 0.0:
+                return False
+            aa = tuple(x / scale for x in a)
+            bb = tuple(x / scale for x in b)
+            d2 = _dist2(aa, bb)
+            return d2 < _norm2(aa) and d2 < _norm2(bb)
+        d2 = _dist2(a, b)
+        return d2 < a2 and d2 < b2
+
+    def _predict_temporal(
+        self, layer: Layer, context: Kernel
+    ) -> set[Prediction]:
+        """Read existing temporal knowledge from present to next context.
+
+        Prediction is deliberately a projection of temporal CELL centers only.
+        The temporal quotient retains no separate source/target variance, so no
+        projected kernel radius can be reconstructed canonically.  Both the
+        present context center and each temporal source projection are therefore
+        compared as point kernels by the ordinary CONCERN predicate.
+        """
+        current = context.C
+        out: set[Prediction] = set()
+        for cell in layer.temporal_cells:
+            source, target = self._split_temporal(cell.C)
+            if self._point_concern(current, source):
+                out.add((self.universe, current, source, target))
+        return out
+
     # ----- public step ---------------------------------------------------
 
     def step(self, presentation: object, *, detailed_report: bool = False) -> dict[str, object]:
@@ -1163,6 +1205,7 @@ class Auxein:
         layer_count_start = len(self.layers)
         concept_readout: set[Recognition] = set()
         sequence_readout: set[TemporalRecognition] = set()
+        prediction_readout: set[Prediction] = set()
         all_seed_requests: list[tuple[str, int, Kernel]] = []
         layer_reports: list[dict[str, object]] = []
         temporal_reports: list[dict[str, object]] = []
@@ -1187,11 +1230,18 @@ class Auxein:
                 frontier_requested = True
             current = result.output
 
-        if self.mode == "temporal":
+        if self.mode != "geometry":
             for layer_index in range(layer_count_start):
                 layer = self.layers[layer_index]
                 previous = layer.previous
                 context = contexts[layer_index]
+
+                # Predict from the frozen temporal knowledge that existed before
+                # this layer's temporal learning phase. A knowledge created or
+                # promoted during the current step has authority only next step.
+                if self.mode == "predictive" and context is not None:
+                    prediction_readout.update(self._predict_temporal(layer, context))
+
                 if previous is not None and context is not None:
                     temporal_presentation = [self._temporal_atom(previous, context)]
                     result = self._process_temporal(
@@ -1314,7 +1364,28 @@ class Auxein:
                 ]
                 for universe, inputs, recognised in sorted_sequences
             ]
-            readout = {"concepts": concepts, "sequences": sequences}
+            if self.mode == "temporal":
+                readout = {"concepts": concepts, "sequences": sequences}
+            else:
+                sorted_predictions = sorted(
+                    prediction_readout,
+                    key=lambda item: (item[0], item[1], item[2], item[3]),
+                )
+                predictions = [
+                    [
+                        universe,
+                        list(current_context),
+                        list(recognised_source),
+                        list(predicted_successor),
+                    ]
+                    for universe, current_context, recognised_source, predicted_successor
+                    in sorted_predictions
+                ]
+                readout = {
+                    "concepts": concepts,
+                    "sequences": sequences,
+                    "predictions": predictions,
+                }
 
         return {
             "step_index": self.steps_seen - 1,
@@ -1346,15 +1417,15 @@ class Auxein:
             "cells_per_layer": [len(layer.cells) for layer in self.layers],
             "sigma_per_layer": [len(layer.sigma) for layer in self.layers],
             "temporal_cells_per_layer": [
-                len(layer.temporal_cells) if self.mode == "temporal" else 0
+                len(layer.temporal_cells) if self.mode != "geometry" else 0
                 for layer in self.layers
             ],
             "temporal_sigma_per_layer": [
-                len(layer.temporal_sigma) if self.mode == "temporal" else 0
+                len(layer.temporal_sigma) if self.mode != "geometry" else 0
                 for layer in self.layers
             ],
             "previous_context_per_layer": [
-                layer.previous is not None if self.mode == "temporal" else False
+                layer.previous is not None if self.mode != "geometry" else False
                 for layer in self.layers
             ],
             "maintenance_units": maintenance,
