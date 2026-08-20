@@ -30,6 +30,15 @@ class KernelTests(unittest.TestCase):
         out = h.ema(target, 0.0, 1.0)
         self.assertEqual(out, h)
 
+    def test_ema_subnormal_support_does_not_square_the_denominator(self) -> None:
+        h = Kernel(1e-200, (0.0,), 0.0)
+        target = Kernel(1e-200, (1.0,), 0.0)
+        out = h.ema(target, 0.5, 0.5)
+        self.assertEqual(out.W, 1e-200)
+        self.assertEqual(out.C, (0.5,))
+        self.assertEqual(out.V, 0.25)
+        self.assertTrue(math.isfinite(out.V))
+
 
 class CanonTests(unittest.TestCase):
     def make(self, **kwargs: object) -> Auxein:
@@ -44,10 +53,32 @@ class CanonTests(unittest.TestCase):
     def test_packing(self) -> None:
         n = self.make(budget=0)
         self.assertEqual(n.kernel_units, 24)
-        self.assertEqual(n.network_units, 49)
-        self.assertEqual(n.min_units, 65)
-        self.assertEqual(n.budget_units, 65)
-        self.assertEqual(n.maintenance_units(), 65)
+        self.assertEqual(n.network_units, 50)
+        self.assertEqual(n.min_units, 66)
+        self.assertEqual(n.budget_units, 66)
+        self.assertEqual(n.maintenance_units(), 66)
+
+        t = self.make(mode="temporal", budget=0)
+        self.assertEqual(t.temporal_kernel_units, 32)
+        self.assertEqual(t.layer_units, 57)
+        self.assertEqual(t.min_units, 107)
+        self.assertEqual(t.maintenance_units(), 107)
+
+    def test_extreme_f64_exact_recurrence_remains_recognisable(self) -> None:
+        for x in (float.fromhex("0x0.0000000000001p-1022"), 1e-200, 1e200, 1e308):
+            n = self.make(dimension=1, scalar="f64")
+            n.step([[x]])
+            n.step([[x]])
+            report = n.step([[x]])
+            self.assertEqual(report["readout"], [["auxein", [x], [x]]])
+
+    def test_f64_support_underflow_is_not_cognitive_death(self) -> None:
+        n = self.make(dimension=1, memory=0.25, eta=1.0, scalar="f64", budget=1000)
+        n.step([[10.0]])
+        for _ in range(320):
+            n.step([[1.0]])
+        old = next(kernel for kernel in n.layers[0].sigma if kernel.C == (10.0,))
+        self.assertEqual(old.W, float.fromhex("0x0.0000000000001p-1022"))
 
     def test_external_presentation_is_uniform_point_kernels(self) -> None:
         n = self.make()
@@ -296,6 +327,39 @@ class CanonTests(unittest.TestCase):
         restored = Auxein.from_state(state, budget_units=n.budget_units, universe=n.universe)
         self.assertEqual(restored.export_state(), state)
 
+    def test_f32_projected_seed_is_revalidated_before_persistence(self) -> None:
+        state = {
+            "format_version": 3,
+            "dimension": 2,
+            "scalar": "f32",
+            "memory": 1.0,
+            "eta": 1.0,
+            "mode": "geometry",
+            "steps_seen": 0,
+            "layers": [
+                {
+                    "sigma": [],
+                    "cells": [{"W": 1.0, "C": [1.0, 1.0], "V": 0.0}],
+                }
+            ],
+        }
+        n = Auxein.from_state(state, budget=100, universe="projection")
+
+        # In binary64 this point is just outside the strict first CONCERN
+        # bound x+y>1. Its f32 projection lies just inside it. A raw seed may
+        # therefore be requested, but the projected kernel must be
+        # revalidated before it can become persistent Sigma state.
+        report = n.step([[0.199999999, 0.8]], detailed_report=True)
+
+        self.assertEqual(report["layer_reports"][0]["unknown_atom_count"], 1)
+        self.assertEqual(report["layer_reports"][0]["seed_requests"], 1)
+        self.assertEqual(n.layers[0].sigma, [])
+        persisted = n.export_state()
+        restored = Auxein.from_state(
+            persisted, budget_units=n.budget_units, universe=n.universe
+        )
+        self.assertEqual(restored.export_state(), persisted)
+
     def test_budget_is_not_serialized(self) -> None:
         n = self.make()
         state = n.export_state()
@@ -384,6 +448,172 @@ class CanonTests(unittest.TestCase):
                 self.assertEqual(kb.C, (ka.C[0], 0.0, 0.0))
                 self.assertEqual(kb.V, ka.V)
                 self.assertEqual(kb.W, ka.W)
+
+
+    def test_mode_is_geometry_by_default_and_strict(self) -> None:
+        n = self.make()
+        self.assertEqual(n.mode, "geometry")
+        self.assertEqual(n.export_state()["mode"], "geometry")
+        with self.assertRaises(ValueError):
+            self.make(mode="predictive")
+
+    def test_temporal_readout_recognises_adjacent_order(self) -> None:
+        n = self.make(mode="temporal", eta=0.0, universe="lab")
+        n.layers[0].cells = [Kernel(1.0, (1.0,), 0.0), Kernel(1.0, (5.0,), 0.0)]
+        n.layers[0].temporal_cells = [Kernel(1.0, (1.0, 5.0), 0.0)]
+
+        first = n.step([[1.0]])
+        self.assertEqual(first["readout"]["sequences"], [])
+        second = n.step([[5.0]])
+        self.assertEqual(second["readout"]["concepts"], [["lab", [5.0], [5.0]]])
+        self.assertEqual(
+            second["readout"]["sequences"],
+            [["lab", [[1.0], [5.0]], [[1.0], [5.0]]]],
+        )
+        third = n.step([[1.0]])
+        self.assertEqual(third["readout"]["sequences"], [])
+
+    def test_temporal_recurrence_promotes_only_after_recurrence(self) -> None:
+        n = self.make(mode="temporal", budget=1000)
+        n.layers[0].cells = [Kernel(1.0, (1.0,), 0.0), Kernel(1.0, (5.0,), 0.0)]
+        n.step([[1.0]])
+        n.step([[5.0]])  # first A->B occurrence seeds temporal Sigma
+        self.assertEqual(len(n.layers[0].temporal_sigma), 1)
+        self.assertEqual(n.layers[0].temporal_sigma[0].C, (1.0, 5.0))
+        n.step([[1.0]])  # B->A is a distinct, non-concerned transition
+        n.step([[5.0]])  # second A->B occurrence can promote
+        self.assertTrue(any(cell.C == (1.0, 5.0) for cell in n.layers[0].temporal_cells))
+
+    def test_missing_context_breaks_temporal_chain(self) -> None:
+        n = self.make(mode="temporal", eta=0.0)
+        n.layers[0].cells = [Kernel(1.0, (1.0,), 0.0), Kernel(1.0, (3.0,), 0.0)]
+        n.layers[0].temporal_cells = [Kernel(1.0, (1.0, 3.0), 0.0)]
+        n.step([[1.0]])
+        gap = n.step([[99.0]])
+        self.assertEqual(gap["readout"]["concepts"], [])
+        self.assertFalse(n.summary()["previous_context_per_layer"][0])
+        after = n.step([[3.0]])
+        self.assertEqual(after["readout"]["sequences"], [])
+
+    def test_eta_zero_freezes_temporal_learning_but_previous_advances(self) -> None:
+        n = self.make(mode="temporal", eta=0.0)
+        n.layers[0].cells = [Kernel(1.0, (1.0,), 0.0), Kernel(1.0, (3.0,), 0.0)]
+        n.layers[0].temporal_cells = [Kernel(1.0, (1.0, 3.0), 1.0)]
+        before_cells = [cell.copy() for cell in n.layers[0].temporal_cells]
+        n.step([[1.0]])
+        report = n.step([[3.0]])
+        self.assertTrue(report["readout"]["sequences"])
+        self.assertEqual(n.layers[0].temporal_cells, before_cells)
+        self.assertEqual(n.layers[0].previous.C, (3.0,))
+
+    def test_temporal_roundtrip_preserves_previous_context(self) -> None:
+        n = self.make(mode="temporal", eta=0.0, universe="roundtrip")
+        n.layers[0].cells = [Kernel(1.0, (1.0,), 0.0), Kernel(1.0, (3.0,), 0.0)]
+        n.layers[0].temporal_cells = [Kernel(1.0, (1.0, 3.0), 0.0)]
+        n.step([[1.0]])
+        state = n.export_state()
+        restored = Auxein.from_state(state, budget_units=n.budget_units, universe=n.universe)
+        self.assertEqual(restored.export_state(), state)
+        report = restored.step([[3.0]])
+        self.assertEqual(
+            report["readout"]["sequences"],
+            [["roundtrip", [[1.0], [3.0]], [[1.0], [3.0]]]],
+        )
+
+    def test_temporal_growth_shares_one_global_transaction(self) -> None:
+        n = self.make(mode="temporal", budget=1000)
+        n.layers[0].cells = [Kernel(1.0, (1.0,), 0.0), Kernel(1.0, (3.0,), 0.0)]
+        n.step([[1.0]])
+        base = n.maintenance_units()
+        n.set_budget(budget_units=base + max(n.kernel_units, n.temporal_kernel_units))
+        report = n.step([[3.0], [9.0]])
+        growth = [t for t in report["transformations"] if t["phase"] == "growth"][-1]
+        self.assertEqual(growth["type"], "reject")
+        self.assertEqual(growth["geometric_seeds"], 1)
+        self.assertEqual(growth["temporal_seeds"], 1)
+        self.assertEqual(n.layers[0].sigma, [])
+        self.assertEqual(n.layers[0].temporal_sigma, [])
+
+    def test_forced_contraction_invalidates_temporal_previous(self) -> None:
+        n = self.make(mode="temporal", budget=1000, eta=0.0)
+        n.layers[0].cells = [Kernel(1.0, (1.0,), 0.0)]
+        n.layers[0].temporal_cells = [Kernel(1.0, (1.0, 1.0), 0.0)]
+        n.step([[1.0]])
+        self.assertIsNotNone(n.layers[0].previous)
+        n.set_budget(budget_units=n.min_units)
+        n.step([[1.0]])
+        self.assertEqual(n.layers[0].cells, [])
+        self.assertEqual(n.layers[0].temporal_cells, [])
+        self.assertIsNone(n.layers[0].previous)
+
+    def test_temporal_product_kernel_is_exact_direct_sum_quotient(self) -> None:
+        n = self.make(mode="temporal")
+        previous = Kernel(0.5, (2.0,), 1.0)
+        current = Kernel(0.25, (7.0,), 4.0)
+        temporal = n._temporal_atom(previous, current)
+        self.assertEqual(temporal.W, 0.125)
+        self.assertEqual(temporal.C, (2.0, 7.0))
+        self.assertEqual(temporal.V, 5.0)
+
+    def test_temporal_population_does_not_age_without_temporal_presentation(self) -> None:
+        n = self.make(mode="temporal", eta=1.0)
+        n.layers[0].cells = [Kernel(1.0, (1.0,), 0.0)]
+        n.layers[0].temporal_cells = [Kernel(2.0, (1.0, 1.0), 0.5)]
+        before = n.layers[0].temporal_cells[0].copy()
+        n.step([[99.0]])  # no recognised context, hence no temporal presentation
+        self.assertEqual(n.layers[0].temporal_cells[0], before)
+
+    def test_temporal_mode_preserves_geometric_trajectory_with_sufficient_budget(self) -> None:
+        g = self.make(mode="geometry", budget=10000)
+        t = self.make(mode="temporal", budget=10000)
+        seq = [[[1.0]], [[5.0]], [[1.0]], [[5.0]], [[1.0], [5.0]]] * 5
+        for presentation in seq:
+            g.step(presentation)
+            t.step(presentation)
+        self.assertEqual(len(g.layers), len(t.layers))
+        for gl, tl in zip(g.layers, t.layers, strict=True):
+            self.assertEqual(gl.cells, tl.cells)
+            self.assertEqual(gl.sigma, tl.sigma)
+
+    def test_temporal_scale_invariance(self) -> None:
+        a = self.make(mode="temporal", budget=10000)
+        b = self.make(mode="temporal", budget=10000)
+        for net, scale in ((a, 1.0), (b, 10.0)):
+            net.layers[0].cells = [
+                Kernel(1.0, (1.0 * scale,), 0.0),
+                Kernel(1.0, (5.0 * scale,), 0.0),
+            ]
+        seq = [[[1.0]], [[5.0]], [[1.0]], [[5.0]]] * 5
+        for presentation in seq:
+            a.step(presentation)
+            b.step([[10.0 * v[0]] for v in presentation])
+        self.assertEqual(len(a.layers[0].temporal_cells), len(b.layers[0].temporal_cells))
+        for ka, kb in zip(a.layers[0].temporal_cells, b.layers[0].temporal_cells, strict=True):
+            self.assertEqual(tuple(10.0 * x for x in ka.C), kb.C)
+            self.assertAlmostEqual(100.0 * ka.V, kb.V)
+            self.assertAlmostEqual(ka.W, kb.W)
+
+    def test_zero_to_zero_is_temporally_silent(self) -> None:
+        n = self.make(mode="temporal", eta=1.0)
+        n.layers[0].cells = [Kernel(1.0, (-1.0,), 0.0), Kernel(1.0, (1.0,), 0.0)]
+        n.step([[-1.0], [1.0]])
+        n.step([[-1.0], [1.0]])
+        self.assertEqual(n.layers[0].temporal_sigma, [])
+        self.assertEqual(n.layers[0].temporal_cells, [])
+
+    def test_whole_presentation_splitting_is_exactly_invariant(self) -> None:
+        a = Auxein(dimension=3, memory=10.0, eta=1.0, scalar="f32", budget=100, universe="auxein")
+        b = Auxein.from_state(a.export_state(), budget=100, universe="auxein")
+        p = [
+            [6.125, -5.75, 6.375],
+            [6.125, -5.75, 6.375],
+            [-3.875, -1.75, -5.625],
+            [5.1259765625, 7.2509765625, -3.6250009536743164],
+        ]
+        split = [list(v) for _ in range(3) for v in p]
+        for _ in range(50):
+            self.assertEqual(a.step(p), b.step(split))
+            self.assertEqual(a.export_state(), b.export_state())
 
     def test_external_input_is_strictly_vectors(self) -> None:
         n = self.make()

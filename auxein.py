@@ -1,20 +1,22 @@
-"""Auxein v0.2.0 reference implementation.
+"""Auxein v0.3.0 reference implementation.
 
-This module implements the mathematical/material canon in
-``Auxein_Canon_v0.2.0.md`` using only the Python standard library.
+This module implements ``spec/auxein.md`` using only the Python standard
+library.  Geometry mode is the canonical centered-kernel recursion. Temporal
+mode keeps that geometry unchanged and adds, for each layer, an independent
+``E⊕E`` population learning only adjacent ``step-1 -> step`` context pairs.
 
-The persistent cognitive state is deliberately small:
+Persistent cognitive state remains deliberately small:
 
-    NETWORK -> ordered LAYERs -> {CELL kernels, private Sigma kernels}
+    NETWORK -> ordered LAYERs
+                 |- geometric {CELL, Sigma}
+                 `- temporal  {CELL, Sigma, previous context}  [temporal mode]
 
-External vectors enter as point kernels ``(r, C, V=0)``.  Internal layers
-receive at most one contextual kernel per presentation.  All contexts,
-responsibilities, reports, allocation tables and readouts are ephemeral.
+Contexts, responsibilities, current presentations and readouts are ephemeral.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation, ROUND_FLOOR
 import math
 import struct
@@ -22,11 +24,13 @@ from numbers import Real
 from typing import Iterable, Mapping, Sequence
 
 
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
 SCALARS = {"f32": 4, "f64": 8}
+MODES = {"geometry", "temporal"}
 
 Vector = tuple[float, ...]
 Recognition = tuple[str, Vector, Vector]
+TemporalRecognition = tuple[str, tuple[Vector, Vector], tuple[Vector, Vector]]
 
 
 # ---------------------------------------------------------------------------
@@ -56,6 +60,12 @@ def _eta(value: object) -> float:
     return out
 
 
+def _mode(value: object) -> str:
+    if not isinstance(value, str) or value not in MODES:
+        raise ValueError("mode must be 'geometry' or 'temporal'")
+    return value
+
+
 def _vector(value: object, dimension: int, label: str) -> Vector:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
         raise TypeError(f"{label} must be a vector")
@@ -77,12 +87,53 @@ def _zero(v: Vector) -> bool:
 
 
 def _norm2(a: Vector) -> float:
-    return math.fsum(x * x for x in a)
+    try:
+        return math.fsum(x * x for x in a)
+    except OverflowError:
+        return math.inf
 
 
 def _dist2(a: Vector, b: Vector) -> float:
-    return math.fsum((x - y) * (x - y) for x, y in zip(a, b, strict=True))
+    try:
+        return math.fsum((x - y) * (x - y) for x, y in zip(a, b, strict=True))
+    except OverflowError:
+        return math.inf
 
+
+_MIN_F64_SUBNORMAL = float.fromhex("0x0.0000000000001p-1022")
+
+
+def _decayed_support(weight: float, lam: float) -> float:
+    """One homothetic forgetting step without cognitive death by underflow."""
+    if weight <= 0.0:
+        return weight
+    out = lam * weight
+    return _MIN_F64_SUBNORMAL if out <= 0.0 else out
+
+
+def _orderless_sum(values: Iterable[float]) -> float:
+    """High-accuracy expansion sum with no caller-order authority."""
+    partials: list[float] = []
+    for value in values:
+        x = float(value)
+        i = 0
+        for y0 in partials:
+            y = y0
+            if abs(x) < abs(y):
+                x, y = y, x
+            hi = x + y
+            lo = y - (hi - x)
+            if lo != 0.0:
+                if i < len(partials):
+                    partials[i] = lo
+                else:
+                    partials.append(lo)
+                i += 1
+            x = hi
+        del partials[i:]
+        if x != 0.0:
+            partials.append(x)
+    return sum(partials, 0.0)
 
 def _decimal_nonnegative(value: object, label: str) -> Decimal:
     if isinstance(value, bool):
@@ -168,14 +219,14 @@ class Kernel:
         )
         variance = (
             (self.W * self.V + other.W * other.V) / total
-            + (self.W * other.W / (total * total)) * delta2
+            + (self.W / total) * (other.W / total) * delta2
         )
         return Kernel(total, center, variance)
 
     def ema(self, target: "Kernel", beta: float, lam: float) -> "Kernel":
         if self.W <= 0.0 or target.W <= 0.0:
             raise ValueError("EMA kernels must have positive weight")
-        a = lam * self.W
+        a = _decayed_support(self.W, lam)
         b = beta * target.W
         if b == 0.0:
             return Kernel(a, self.C, self.V)
@@ -190,31 +241,56 @@ class Kernel:
         )
         variance = (
             (a * self.V + b * target.V) / total
-            + (a * b / (total * total)) * delta2
+            + (a / total) * (b / total) * delta2
         )
         return Kernel(total, center, variance)
 
 
 class _KernelAccumulator:
-    """Stable deterministic accumulator for a weighted point cloud.
+    """Order-independent positive accumulator for a finite kernel cloud.
 
-    Coalesced presentation atoms are processed in lexicographic vector order,
-    making the floating trajectory independent of caller iteration order.
+    Contributions are kept only until the current presentation is closed.
+    Finalisation applies the canonical centered-kernel definition directly:
+    one stable pass for W/C, then one stable positive pass for V.  No merge
+    order, input permutation or coordinate ordering has numerical authority.
     """
 
-    __slots__ = ("_kernel",)
+    __slots__ = ("_items",)
 
     def __init__(self) -> None:
-        self._kernel: Kernel | None = None
+        self._items: list[tuple[Vector, float, float]] = []
 
     def add(self, center: Vector, variance: float, weight: float) -> None:
-        if weight <= 0.0:
-            return
-        atom = Kernel(weight, center, variance)
-        self._kernel = atom if self._kernel is None else self._kernel.merged(atom)
+        if weight > 0.0:
+            self._items.append((center, variance, weight))
 
     def get(self) -> Kernel | None:
-        return None if self._kernel is None else self._kernel.copy()
+        if not self._items:
+            return None
+        if len(self._items) == 1:
+            center, variance, weight = self._items[0]
+            return Kernel(weight, center, variance)
+        first_center, first_variance, _ = self._items[0]
+        if all(
+            center == first_center and variance == first_variance
+            for center, variance, _ in self._items[1:]
+        ):
+            return Kernel(
+                _orderless_sum(weight for _, _, weight in self._items),
+                first_center,
+                first_variance,
+            )
+        W = _orderless_sum(weight for _, _, weight in self._items)
+        D = len(self._items[0][0])
+        C = tuple(
+            _orderless_sum(weight * center[j] for center, _, weight in self._items) / W
+            for j in range(D)
+        )
+        V = _orderless_sum(
+            weight * (variance + _dist2(center, C))
+            for center, variance, weight in self._items
+        ) / W
+        return Kernel(W, C, V)
 
 
 # ---------------------------------------------------------------------------
@@ -225,6 +301,9 @@ class _KernelAccumulator:
 class Layer:
     sigma: list[Kernel]
     cells: list[Kernel]
+    temporal_sigma: list[Kernel] = field(default_factory=list)
+    temporal_cells: list[Kernel] = field(default_factory=list)
+    previous: Kernel | None = None
 
 
 @dataclass(slots=True)
@@ -234,8 +313,20 @@ class _CellStart:
 
 
 @dataclass(slots=True)
+class _PopulationResult:
+    cells: list[Kernel]
+    sigma: list[Kernel]
+    context: Kernel | None
+    readout: set[tuple[Vector, Vector]]
+    seed_requests: list[Kernel]
+    transformations: list[dict[str, object]]
+    report: dict[str, object]
+
+
+@dataclass(slots=True)
 class _LayerResult:
     output: list[Kernel]
+    context: Kernel | None
     readout: set[Recognition]
     seed_requests: list[Kernel]
     transformations: list[dict[str, object]]
@@ -247,7 +338,7 @@ class _LayerResult:
 
 
 class Auxein:
-    """Reference Auxein v0.2.0 network."""
+    """Reference Auxein v0.3.0 network."""
 
     def __init__(
         self,
@@ -256,6 +347,7 @@ class Auxein:
         memory: float,
         eta: float = 1.0,
         scalar: str = "f64",
+        mode: str = "geometry",
         universe: str = "auxein",
         budget: object | None = None,
         budget_units: int | None = None,
@@ -267,6 +359,7 @@ class Auxein:
         self._project = _Projector(scalar)
         self.memory = self._project.real(_positive(memory, "memory"))
         self.eta = self._project.real(_eta(eta))
+        self.mode = _mode(mode)
         if not isinstance(universe, str) or not universe:
             raise ValueError("universe must be a nonempty string")
         self.universe = universe
@@ -292,12 +385,22 @@ class Auxein:
         return (self.dimension + 2) * self.scalar_bytes
 
     @property
+    def temporal_kernel_units(self) -> int:
+        return (2 * self.dimension + 2) * self.scalar_bytes
+
+    @property
     def network_units(self) -> int:
-        return 33 + 2 * self.scalar_bytes
+        return 34 + 2 * self.scalar_bytes
+
+    @property
+    def layer_units(self) -> int:
+        if self.mode == "geometry":
+            return 16
+        return 33 + self.kernel_units
 
     @property
     def min_units(self) -> int:
-        return self.network_units + 16
+        return self.network_units + self.layer_units
 
     def _budget_to_units(self, value: object) -> int:
         capacity = _decimal_nonnegative(value, "budget")
@@ -354,20 +457,28 @@ class Auxein:
         return Kernel(W, C, V)
 
     def export_state(self) -> dict[str, object]:
+        layers: list[dict[str, object]] = []
+        for layer in self.layers:
+            payload: dict[str, object] = {
+                "sigma": [self._kernel_state(k) for k in layer.sigma],
+                "cells": [self._kernel_state(k) for k in layer.cells],
+            }
+            if self.mode == "temporal":
+                payload.update({
+                    "temporal_sigma": [self._kernel_state(k) for k in layer.temporal_sigma],
+                    "temporal_cells": [self._kernel_state(k) for k in layer.temporal_cells],
+                    "previous": None if layer.previous is None else self._kernel_state(layer.previous),
+                })
+            layers.append(payload)
         return {
             "format_version": FORMAT_VERSION,
             "dimension": self.dimension,
             "scalar": self.scalar,
             "memory": self._project.real(self.memory),
             "eta": self._project.real(self.eta),
+            "mode": self.mode,
             "steps_seen": self.steps_seen,
-            "layers": [
-                {
-                    "sigma": [self._kernel_state(k) for k in layer.sigma],
-                    "cells": [self._kernel_state(k) for k in layer.cells],
-                }
-                for layer in self.layers
-            ],
+            "layers": layers,
         }
 
     @staticmethod
@@ -386,7 +497,8 @@ class Auxein:
         if not isinstance(state, Mapping):
             raise TypeError("state must be a mapping")
         expected = {
-            "format_version", "dimension", "scalar", "memory", "eta", "steps_seen", "layers",
+            "format_version", "dimension", "scalar", "memory", "eta", "mode",
+            "steps_seen", "layers",
         }
         _exact_keys(state, expected, "state")
         if state["format_version"] != FORMAT_VERSION:
@@ -397,11 +509,13 @@ class Auxein:
             raise ValueError("invalid state.dimension")
         if isinstance(steps_seen, bool) or not isinstance(steps_seen, int) or steps_seen < 0:
             raise ValueError("invalid state.steps_seen")
+        mode = _mode(state["mode"])
         network = cls(
             dimension=dimension,
             memory=_positive(state["memory"], "state.memory"),
             eta=_eta(state["eta"]),
             scalar=str(state["scalar"]),
+            mode=mode,
             universe=universe,
             budget=budget,
             budget_units=budget_units,
@@ -413,16 +527,51 @@ class Auxein:
         for li, raw_layer in enumerate(raw_layers):
             if not isinstance(raw_layer, Mapping):
                 raise ValueError(f"state.layers[{li}] must be an object")
-            _exact_keys(raw_layer, {"sigma", "cells"}, f"state.layers[{li}]")
-            sigma = network._load_kernel_list(raw_layer["sigma"], f"state.layers[{li}].sigma")
-            cells = network._load_kernel_list(raw_layer["cells"], f"state.layers[{li}].cells")
-            layers.append(Layer(sigma, cells))
+            if mode == "geometry":
+                _exact_keys(raw_layer, {"sigma", "cells"}, f"state.layers[{li}]")
+            else:
+                _exact_keys(
+                    raw_layer,
+                    {"sigma", "cells", "temporal_sigma", "temporal_cells", "previous"},
+                    f"state.layers[{li}]",
+                )
+            sigma = network._load_kernel_list(
+                raw_layer["sigma"], f"state.layers[{li}].sigma", network.dimension
+            )
+            cells = network._load_kernel_list(
+                raw_layer["cells"], f"state.layers[{li}].cells", network.dimension
+            )
+            if mode == "temporal":
+                temporal_sigma = network._load_kernel_list(
+                    raw_layer["temporal_sigma"],
+                    f"state.layers[{li}].temporal_sigma",
+                    2 * network.dimension,
+                )
+                temporal_cells = network._load_kernel_list(
+                    raw_layer["temporal_cells"],
+                    f"state.layers[{li}].temporal_cells",
+                    2 * network.dimension,
+                )
+                previous = network._load_optional_kernel(
+                    raw_layer["previous"], f"state.layers[{li}].previous", network.dimension
+                )
+            else:
+                temporal_sigma = []
+                temporal_cells = []
+                previous = None
+            layers.append(Layer(sigma, cells, temporal_sigma, temporal_cells, previous))
         network.layers = layers
         network.steps_seen = steps_seen
         network._validate_state()
         return network
 
-    def _load_kernel_list(self, value: object, label: str) -> list[Kernel]:
+    def _load_optional_kernel(self, value: object, label: str, dimension: int) -> Kernel | None:
+        if value is None:
+            return None
+        items = self._load_kernel_list([value], label, dimension)
+        return items[0]
+
+    def _load_kernel_list(self, value: object, label: str, dimension: int) -> list[Kernel]:
         if not isinstance(value, list):
             raise ValueError(f"{label} must be a list")
         kernels: list[Kernel] = []
@@ -431,7 +580,7 @@ class Auxein:
                 raise ValueError(f"{label}[{index}] must be an object")
             _exact_keys(item, {"W", "C", "V"}, f"{label}[{index}]")
             W = _positive(item["W"], f"{label}[{index}].W")
-            C = _vector(item["C"], self.dimension, f"{label}[{index}].C")
+            C = _vector(item["C"], dimension, f"{label}[{index}].C")
             V = _finite(item["V"], f"{label}[{index}].V")
             if V < 0.0:
                 raise ValueError(f"{label}[{index}].V must be nonnegative")
@@ -442,26 +591,47 @@ class Auxein:
             kernels.append(projected)
         return kernels
 
+    def _validate_compartment(
+        self, cells: Sequence[Kernel], sigma: Sequence[Kernel], label: str
+    ) -> None:
+        self._assert_unique_geometry(cells, f"{label}.cells")
+        self._assert_unique_geometry(sigma, f"{label}.sigma")
+        cell_norms = [(cell, _norm2(cell.C)) for cell in cells]
+        for cell in cells:
+            if _zero(cell.C):
+                raise ValueError(f"{label} CELL center must be nonzero")
+        for kernel in sigma:
+            if _zero(kernel.C):
+                raise ValueError(f"{label} Sigma center must be nonzero")
+            atom = Kernel(1.0, kernel.C, kernel.V)
+            c2 = _norm2(kernel.C)
+            if any(self._concern(cell, norm2, atom, c2)[0] for cell, norm2 in cell_norms):
+                raise ValueError(f"{label} Sigma kernel is already covered by a CELL")
+
     def _validate_state(self) -> None:
         if not self.layers:
             raise ValueError("network must contain L0")
         for li, layer in enumerate(self.layers):
-            self._assert_unique_geometry(layer.cells, f"layers[{li}].cells")
-            self._assert_unique_geometry(layer.sigma, f"layers[{li}].sigma")
-            cell_norms = [(cell, _norm2(cell.C)) for cell in layer.cells]
-            for cell in layer.cells:
-                if _zero(cell.C):
-                    raise ValueError("persistent CELL center must be nonzero")
-            for kernel in layer.sigma:
-                if _zero(kernel.C):
-                    raise ValueError("persistent Sigma center must be nonzero")
-                atom = Kernel(1.0, kernel.C, kernel.V)
-                c2 = _norm2(kernel.C)
-                if any(self._concern(cell, norm2, atom, c2)[0] for cell, norm2 in cell_norms):
-                    raise ValueError("persistent Sigma kernel is already covered by a CELL")
-        # A normal state cannot keep useless empty terminal layers beyond one.
-        while len(self.layers) > 1 and not self.layers[-1].cells and not self.layers[-1].sigma and not self.layers[-2].cells:
-            raise ValueError("state contains redundant terminal layers")
+            self._validate_compartment(layer.cells, layer.sigma, f"layers[{li}]")
+            if self.mode == "temporal":
+                self._validate_compartment(
+                    layer.temporal_cells, layer.temporal_sigma, f"layers[{li}].temporal"
+                )
+                if layer.previous is not None and len(layer.previous.C) != self.dimension:
+                    raise ValueError("previous context has invalid dimension")
+            elif layer.temporal_sigma or layer.temporal_cells or layer.previous is not None:
+                raise ValueError("geometry mode cannot contain temporal state")
+        # A normal state cannot keep a redundant empty terminal layer when its
+        # predecessor has no geometric knowledge capable of a vertical frontier.
+        if len(self.layers) > 1:
+            last = self.layers[-1]
+            previous = self.layers[-2]
+            if (
+                not last.cells and not last.sigma
+                and not last.temporal_cells and not last.temporal_sigma
+                and not previous.cells
+            ):
+                raise ValueError("state contains redundant terminal layers")
 
     @staticmethod
     def _assert_unique_geometry(kernels: Sequence[Kernel], label: str) -> None:
@@ -475,25 +645,49 @@ class Auxein:
     # ----- material economy ---------------------------------------------
 
     def maintenance_units(self) -> int:
-        payloads = sum(len(layer.sigma) + len(layer.cells) for layer in self.layers)
-        return self.network_units + 16 * len(self.layers) + payloads * self.kernel_units
+        if self.mode == "geometry":
+            payload_units = sum(
+                (len(layer.sigma) + len(layer.cells)) * self.kernel_units
+                for layer in self.layers
+            )
+        else:
+            payload_units = sum(
+                (len(layer.sigma) + len(layer.cells)) * self.kernel_units
+                + (len(layer.temporal_sigma) + len(layer.temporal_cells))
+                * self.temporal_kernel_units
+                for layer in self.layers
+            )
+        return self.network_units + self.layer_units * len(self.layers) + payload_units
+
+    def _invalidate_previous(self) -> None:
+        if self.mode == "temporal":
+            for layer in self.layers:
+                layer.previous = None
+
+    def _layer_has_cells(self, layer: Layer) -> bool:
+        return bool(layer.cells or (self.mode == "temporal" and layer.temporal_cells))
 
     def _force_solvency(self, transformations: list[dict[str, object]]) -> None:
         if self.maintenance_units() <= self.budget_units:
             return
 
-        # Work in progress is discarded as one simultaneous wave.
-        removed_sigma = sum(len(layer.sigma) for layer in self.layers)
+        # Work in progress is discarded as one simultaneous wave in both spaces.
+        removed_sigma = sum(
+            len(layer.sigma)
+            + (len(layer.temporal_sigma) if self.mode == "temporal" else 0)
+            for layer in self.layers
+        )
         if removed_sigma:
             for layer in self.layers:
                 layer.sigma.clear()
+                if self.mode == "temporal":
+                    layer.temporal_sigma.clear()
             transformations.append({
                 "phase": "solvency", "type": "clear_sigma", "count": removed_sigma
             })
 
-        # Terminal empty layers are material only and can be removed immediately.
         trimmed = 0
-        while len(self.layers) > 1 and not self.layers[-1].cells:
+        while len(self.layers) > 1 and not self._layer_has_cells(self.layers[-1]):
             self.layers.pop()
             trimmed += 1
         if trimmed:
@@ -501,23 +695,29 @@ class Auxein:
                 "phase": "solvency", "type": "trim_layers", "count": trimmed
             })
         if self.maintenance_units() <= self.budget_units:
+            self._invalidate_previous()
             return
 
-        # Canonically, CELL destruction proceeds by increasing exact K waves.
-        # Compute all waves once, then simulate payload/layer removal to find
-        # the required cutoff.  This is O(C log C + L), not O(C^2) rescanning.
-        valued: list[tuple[float, int, Kernel]] = []
-        counts = [len(layer.cells) for layer in self.layers]
-        total_cells = 0
+        # CELL destruction is one common K ordering across geometric and
+        # temporal knowledge. Equal K values are destroyed as whole waves.
+        valued: list[tuple[float, int, str, Kernel]] = []
+        g_counts = [len(layer.cells) for layer in self.layers]
+        t_counts = [len(layer.temporal_cells) for layer in self.layers]
         for li, layer in enumerate(self.layers):
-            for cell in layer.cells:
-                valued.append((self.cell_value(cell), li, cell))
-                total_cells += 1
+            valued.extend((self.cell_value(cell), li, "geometry", cell) for cell in layer.cells)
+            if self.mode == "temporal":
+                valued.extend(
+                    (self.cell_value(cell), li, "temporal", cell)
+                    for cell in layer.temporal_cells
+                )
         if not valued:
-            raise RuntimeError("minimal Auxein state exceeds the execution budget")
+            self._invalidate_previous()
+            if self.maintenance_units() > self.budget_units:
+                raise RuntimeError("minimal Auxein state exceeds the execution budget")
+            return
         valued.sort(key=lambda item: item[0])
 
-        active_layers = len(counts)
+        active_layers = len(self.layers)
         cutoff: float | None = None
         removed_cells = 0
         waves = 0
@@ -526,32 +726,41 @@ class Auxein:
             k = valued[position][0]
             stop = position
             while stop < len(valued) and valued[stop][0] == k:
-                _, li, _ = valued[stop]
-                counts[li] -= 1
-                total_cells -= 1
+                _, li, space, _ = valued[stop]
+                if space == "geometry":
+                    g_counts[li] -= 1
+                else:
+                    t_counts[li] -= 1
                 removed_cells += 1
                 stop += 1
             waves += 1
-            while active_layers > 1 and counts[active_layers - 1] == 0:
+            while (
+                active_layers > 1
+                and g_counts[active_layers - 1] == 0
+                and t_counts[active_layers - 1] == 0
+            ):
                 active_layers -= 1
-            simulated_units = (
-                self.network_units
-                + 16 * active_layers
-                + total_cells * self.kernel_units
-            )
+            simulated_units = self.network_units + self.layer_units * active_layers
+            simulated_units += sum(g_counts[:active_layers]) * self.kernel_units
+            if self.mode == "temporal":
+                simulated_units += sum(t_counts[:active_layers]) * self.temporal_kernel_units
             cutoff = k
             if simulated_units <= self.budget_units:
                 break
             position = stop
         else:
-            raise RuntimeError("minimal Auxein state exceeds the execution budget")
+            # The minimal state is guaranteed affordable by set_budget/from_state.
+            cutoff = math.inf
 
         assert cutoff is not None
-        value_by_identity = {id(cell): k for k, _, cell in valued}
         for layer in self.layers:
-            layer.cells = [cell for cell in layer.cells if value_by_identity[id(cell)] > cutoff]
+            layer.cells = [cell for cell in layer.cells if self.cell_value(cell) > cutoff]
+            if self.mode == "temporal":
+                layer.temporal_cells = [
+                    cell for cell in layer.temporal_cells if self.cell_value(cell) > cutoff
+                ]
         trimmed_after = 0
-        while len(self.layers) > 1 and not self.layers[-1].cells:
+        while len(self.layers) > 1 and not self._layer_has_cells(self.layers[-1]):
             self.layers.pop()
             trimmed_after += 1
         transformations.append({
@@ -565,6 +774,7 @@ class Auxein:
             transformations.append({
                 "phase": "solvency", "type": "trim_layers", "count": trimmed_after
             })
+        self._invalidate_previous()
         if self.maintenance_units() > self.budget_units:
             raise RuntimeError("internal error: forced solvency did not reach the budget")
 
@@ -592,8 +802,19 @@ class Auxein:
             _vector(item, self.dimension, f"presentation[{i}]")
             for i, item in enumerate(value)
         ]
-        mass = 1.0 / len(vectors)
-        return self._coalesce_kernels(Kernel(mass, x, 0.0) for x in vectors)
+        # Canonically coalesce geometry before projecting uniform masses.
+        # For k artificial copies of the whole presentation, count/n is the
+        # same real number as (k*count)/(k*n), whereas summing k rounded
+        # copies of 1/(k*n) can differ by an ulp and leak multiplicity into
+        # higher-layer readouts.
+        counts: dict[Vector, int] = {}
+        for vector in vectors:
+            counts[vector] = counts.get(vector, 0) + 1
+        total = len(vectors)
+        return [
+            Kernel(count / total, vector, 0.0)
+            for vector, count in sorted(counts.items())
+        ]
 
     @staticmethod
     def _coalesce_kernels(kernels: Iterable[Kernel]) -> list[Kernel]:
@@ -633,36 +854,71 @@ class Auxein:
     def _concern(
         kernel: Kernel, norm2_center: float, atom: Kernel, norm2_atom_center: float
     ) -> tuple[bool, float]:
-        """Canonical CONCERN for an internal atom ``(r,c,v)``."""
+        """Canonical CONCERN for an internal atom ``(r,c,v)``.
+
+        The ordinary squared form is retained whenever ``||c||²`` is a
+        positive finite binary64 value.  At the representational extremes,
+        where squaring a finite nonzero center would overflow or underflow,
+        the same homogeneous inequalities are evaluated in units of the
+        incoming atom.  The returned gain is then in those common scaled
+        units; ALLOCATE only uses gains from the same atom, so the common
+        positive factor has no authority.
+        """
+        if (not math.isfinite(norm2_atom_center)) or (
+            norm2_atom_center == 0.0 and not _zero(atom.C)
+        ):
+            scale = max(
+                max(abs(x) for x in atom.C),
+                math.sqrt(atom.V) if atom.V > 0.0 else 0.0,
+            )
+            if scale == 0.0:
+                return False, 0.0
+            x_scaled = tuple(x / scale for x in atom.C)
+            c_scaled = tuple(x / scale for x in kernel.C)
+            x2 = _norm2(x_scaled)
+            geometric = _dist2(x_scaled, c_scaled)
+            if not geometric < x2:
+                return False, x2 - geometric
+            vin = (math.sqrt(atom.V) / scale) ** 2 if atom.V > 0.0 else 0.0
+            vmem = (math.sqrt(kernel.V) / scale) ** 2 if kernel.V > 0.0 else 0.0
+            rhs = _norm2(c_scaled) + vmem
+            da = geometric + vin
+            return da < rhs, x2 - geometric
+
         geometric = _dist2(atom.C, kernel.C)
         da = geometric + atom.V
         d0 = norm2_atom_center + atom.V
         return da < d0 and da < norm2_center + kernel.V, norm2_atom_center - geometric
 
-    def _process_layer(
-        self, layer_index: int, presentation: list[Kernel], *, detailed: bool
-    ) -> _LayerResult:
-        layer = self.layers[layer_index]
-        cells_start = [_CellStart(cell.copy(), _norm2(cell.C)) for cell in layer.cells]
-        sigma_start = [kernel.copy() for kernel in layer.sigma]
+    def _process_population(
+        self,
+        cells: list[Kernel],
+        sigma: list[Kernel],
+        presentation: list[Kernel],
+        *,
+        layer_index: int,
+        phase: str,
+        detailed: bool,
+        collect_context: bool,
+    ) -> _PopulationResult:
+        cells_start = [_CellStart(cell.copy(), _norm2(cell.C)) for cell in cells]
+        sigma_start = [kernel.copy() for kernel in sigma]
         sigma_norms = [_norm2(kernel.C) for kernel in sigma_start]
 
         cell_targets = [_KernelAccumulator() for _ in cells_start]
         cell_received = [0.0] * len(cells_start)
-        context = _KernelAccumulator()
-        readout: set[Recognition] = set()
+        context = _KernelAccumulator() if collect_context else None
+        readout: set[tuple[Vector, Vector]] = set()
         unknown: list[tuple[Kernel, float]] = []
         recognised_atoms = 0
 
         # CONCERN -> ALLOCATE -> RECOGNISE from the frozen CELL state.
-        # Context geometry uses recognised values only; learning
-        # responsibilities never weight the vertical representation.
         for atom in presentation:
             c2 = _norm2(atom.C)
             if _zero(atom.C):
                 unknown.append((atom, c2))
                 continue
-            concerned: list[tuple[int, float]] = []  # index, gain
+            concerned: list[tuple[int, float]] = []
             for ci, snapshot in enumerate(cells_start):
                 ok, gain = self._concern(snapshot.kernel, snapshot.norm2, atom, c2)
                 if ok:
@@ -682,23 +938,16 @@ class Auxein:
                 rho = atom.W * score / denominator
                 cell_targets[ci].add(atom.C, atom.V, rho)
                 cell_received[ci] += rho
-                center = cells_start[ci].kernel.C
-                readout.add((self.universe, atom.C, center))
+                readout.add((atom.C, cells_start[ci].kernel.C))
 
-            # R_s is the exact quotient of recognised snapshot values.
-            recognised_values = sorted({cells_start[ci].kernel.C for ci, _ in concerned})
-            share = atom.W / len(recognised_values)
-            for center in recognised_values:
-                context.add(center, 0.0, share)
+            if context is not None:
+                # R_s is the exact quotient of recognised snapshot values.
+                recognised_values = sorted({cells_start[ci].kernel.C for ci, _ in concerned})
+                share = atom.W / len(recognised_values)
+                for center in recognised_values:
+                    context.add(center, 0.0, share)
 
-        # The context is fixed from L^- before any local learning.
-        context_kernel = context.get()
-        context_emitted = (
-            context_kernel is not None
-            and context_kernel.V > 0.0
-            and not _zero(context_kernel.C)
-        )
-        output = [context_kernel] if context_emitted and context_kernel is not None else []
+        context_kernel = None if context is None else context.get()
 
         # CELL update exactly once per preexisting cell.
         updated_cells: list[Kernel] = []
@@ -707,7 +956,7 @@ class Auxein:
             target = cell_targets[ci].get()
             if target is None:
                 candidate = Kernel(
-                    self.lam * snapshot.kernel.W,
+                    _decayed_support(snapshot.kernel.W, self.lam),
                     snapshot.kernel.C,
                     snapshot.kernel.V,
                 )
@@ -719,7 +968,7 @@ class Auxein:
             if candidate.geometry != snapshot.kernel.geometry:
                 changed_cell_geometries.add(candidate.geometry)
             updated_cells.append(candidate)
-        layer.cells = self._coalesce_projected_kernels(updated_cells)
+        cells = self._coalesce_projected_kernels(updated_cells)
 
         # DETECT is private and sees only atoms unknown to CELL.
         sigma_targets = [_KernelAccumulator() for _ in sigma_start]
@@ -750,7 +999,7 @@ class Auxein:
         for si, old in enumerate(sigma_start):
             target = sigma_targets[si].get()
             if target is None:
-                candidate = Kernel(self.lam * old.W, old.C, old.V)
+                candidate = Kernel(_decayed_support(old.W, self.lam), old.C, old.V)
             else:
                 candidate = old.ema(target, self.beta, self.lam)
             candidate = self._project_kernel(candidate)
@@ -773,20 +1022,16 @@ class Auxein:
         else:
             remaining_sigma = updated_sigma
         if promoted:
-            layer.cells = self._coalesce_projected_kernels([*layer.cells, *promoted])
+            cells = self._coalesce_projected_kernels([*cells, *promoted])
             changed_cell_geometries.update(kernel.geometry for kernel in promoted)
             transformations.append({
-                "phase": "geometry",
+                "phase": phase,
                 "type": "promote",
                 "layer": layer_index,
                 "count": len(promoted),
             })
 
-        # Drop private work now covered by current knowledge.  Unchanged
-        # Sigma was already uncovered at the previous causal boundary, so
-        # only changed CELL geometry can newly cover it.
-        current_cells = layer.cells
-        current_with_norm = [(cell, _norm2(cell.C)) for cell in current_cells]
+        current_with_norm = [(cell, _norm2(cell.C)) for cell in cells]
         changed_with_norm = [
             (cell, norm2)
             for cell, norm2 in current_with_norm
@@ -794,9 +1039,7 @@ class Auxein:
         ]
         cleaned_sigma: list[Kernel] = []
         for kernel in remaining_sigma:
-            candidates = (
-                current_with_norm if kernel.geometry in sigma_changed else changed_with_norm
-            )
+            candidates = current_with_norm if kernel.geometry in sigma_changed else changed_with_norm
             atom = Kernel(1.0, kernel.C, kernel.V)
             c2 = _norm2(kernel.C)
             covered = any(
@@ -805,10 +1048,8 @@ class Auxein:
             )
             if not covered:
                 cleaned_sigma.append(kernel)
-        layer.sigma = cleaned_sigma
+        sigma = cleaned_sigma
 
-        # Seeds were unknown to the frozen CELL state.  Only cells whose
-        # geometry changed (including promotions) can newly cover them.
         admissible_seeds: list[Kernel] = []
         for seed in self._coalesce_kernels(seed_requests):
             atom = Kernel(1.0, seed.C, seed.V)
@@ -829,20 +1070,88 @@ class Auxein:
                 "unknown_atom_count": len(unknown),
                 "recognised_atom_count": recognised_atoms,
                 "cell_count_before": len(cells_start),
-                "cell_count_after": len(layer.cells),
+                "cell_count_after": len(cells),
                 "sigma_count_before": len(sigma_start),
-                "sigma_count_after": len(layer.sigma),
+                "sigma_count_after": len(sigma),
                 "promoted": len(promoted),
                 "seed_requests": len(admissible_seeds),
+                "recognition_count": len(readout),
+                "cell_responsibility_mass": list(cell_received),
+            }
+        return _PopulationResult(
+            cells, sigma, context_kernel, readout, admissible_seeds, transformations, report
+        )
+
+    def _process_layer(
+        self, layer_index: int, presentation: list[Kernel], *, detailed: bool
+    ) -> _LayerResult:
+        layer = self.layers[layer_index]
+        result = self._process_population(
+            layer.cells,
+            layer.sigma,
+            presentation,
+            layer_index=layer_index,
+            phase="geometry",
+            detailed=detailed,
+            collect_context=True,
+        )
+        layer.cells = result.cells
+        layer.sigma = result.sigma
+        context_kernel = result.context
+        context_emitted = (
+            context_kernel is not None
+            and context_kernel.V > 0.0
+            and not _zero(context_kernel.C)
+        )
+        output = [context_kernel] if context_emitted and context_kernel is not None else []
+        readout: set[Recognition] = {
+            (self.universe, local_input, recognised)
+            for local_input, recognised in result.readout
+        }
+        report = result.report
+        if detailed:
+            report.update({
                 "context_emitted": context_emitted,
                 "output_atom_count": len(output),
                 "output_mass": 0.0 if not output else output[0].W,
                 "context_center": None if context_kernel is None else list(context_kernel.C),
                 "context_variance": None if context_kernel is None else context_kernel.V,
-                "recognition_count": len(readout),
-                "cell_responsibility_mass": list(cell_received),
-            }
-        return _LayerResult(output, readout, admissible_seeds, transformations, report)
+            })
+        return _LayerResult(
+            output,
+            context_kernel,
+            readout,
+            result.seed_requests,
+            result.transformations,
+            report,
+        )
+
+    def _process_temporal(
+        self, layer_index: int, presentation: list[Kernel], *, detailed: bool
+    ) -> _PopulationResult:
+        layer = self.layers[layer_index]
+        result = self._process_population(
+            layer.temporal_cells,
+            layer.temporal_sigma,
+            presentation,
+            layer_index=layer_index,
+            phase="temporal",
+            detailed=detailed,
+            collect_context=False,
+        )
+        layer.temporal_cells = result.cells
+        layer.temporal_sigma = result.sigma
+        return result
+
+    def _temporal_atom(self, previous: Kernel, current: Kernel) -> Kernel:
+        return Kernel(
+            previous.W * current.W,
+            previous.C + current.C,
+            previous.V + current.V,
+        )
+
+    def _split_temporal(self, center: Vector) -> tuple[Vector, Vector]:
+        return center[: self.dimension], center[self.dimension :]
 
     # ----- public step ---------------------------------------------------
 
@@ -852,64 +1161,130 @@ class Auxein:
         self._force_solvency(transformations)
         maintenance_open = self.maintenance_units()
         layer_count_start = len(self.layers)
-        readout: set[Recognition] = set()
-        all_seed_requests: list[tuple[int, Kernel]] = []
+        concept_readout: set[Recognition] = set()
+        sequence_readout: set[TemporalRecognition] = set()
+        all_seed_requests: list[tuple[str, int, Kernel]] = []
         layer_reports: list[dict[str, object]] = []
+        temporal_reports: list[dict[str, object]] = []
+        contexts: list[Kernel | None] = [None] * layer_count_start
         frontier_requested = False
 
+        # Complete geometric recursion first. The temporal phase can observe
+        # these contexts but can never feed back into geometry in the same step.
         for layer_index in range(layer_count_start):
             if not current:
                 break
             result = self._process_layer(layer_index, current, detailed=detailed_report)
-            readout.update(result.readout)
+            contexts[layer_index] = result.context
+            concept_readout.update(result.readout)
             transformations.extend(result.transformations)
-            all_seed_requests.extend((layer_index, seed) for seed in result.seed_requests)
+            all_seed_requests.extend(
+                ("geometry", layer_index, seed) for seed in result.seed_requests
+            )
             if detailed_report:
                 layer_reports.append(result.report)
             if layer_index == layer_count_start - 1 and result.output and self.beta > 0.0:
                 frontier_requested = True
             current = result.output
 
-        # Global material growth transaction: all surviving Sigma seeds plus
-        # the optional frontier layer caused by an emitted terminal context.
-        coalesced_requests: dict[tuple[int, Vector, float], list[float]] = {}
-        for layer_index, seed in all_seed_requests:
-            key = (layer_index, seed.C, seed.V)
-            coalesced_requests.setdefault(key, []).append(seed.W)
-        seeds: list[tuple[int, Kernel]] = [
-            (key[0], Kernel(math.fsum(weights), key[1], key[2]))
-            for key, weights in sorted(
-                coalesced_requests.items(),
-                key=lambda kv: (kv[0][0], kv[0][1], kv[0][2]),
-            )
-        ]
-        growth_cost = len(seeds) * self.kernel_units + (16 if frontier_requested else 0)
-        if growth_cost:
-            if self.maintenance_units() + growth_cost <= self.budget_units:
-                seeds_by_layer: dict[int, list[Kernel]] = {}
-                for layer_index, seed in seeds:
-                    seeds_by_layer.setdefault(layer_index, []).append(seed)
-                for layer_index, layer_seeds in seeds_by_layer.items():
-                    projected_seeds = [self._project_kernel(seed) for seed in layer_seeds]
-                    self.layers[layer_index].sigma = self._coalesce_projected_kernels(
-                        [*self.layers[layer_index].sigma, *projected_seeds]
+        if self.mode == "temporal":
+            for layer_index in range(layer_count_start):
+                layer = self.layers[layer_index]
+                previous = layer.previous
+                context = contexts[layer_index]
+                if previous is not None and context is not None:
+                    temporal_presentation = [self._temporal_atom(previous, context)]
+                    result = self._process_temporal(
+                        layer_index, temporal_presentation, detailed=detailed_report
                     )
+                    transformations.extend(result.transformations)
+                    all_seed_requests.extend(
+                        ("temporal", layer_index, seed) for seed in result.seed_requests
+                    )
+                    for local_input, recognised in result.readout:
+                        sequence_readout.add((
+                            self.universe,
+                            self._split_temporal(local_input),
+                            self._split_temporal(recognised),
+                        ))
+                    if detailed_report:
+                        temporal_reports.append(result.report)
+
+                # P_k is causal state, not learned memory: it advances even at eta=0.
+                layer.previous = (
+                    None if context is None else self._project_kernel(context)
+                )
+
+        # One material growth transaction spans geometric and temporal seeds
+        # plus the optional frontier layer.  Admission is evaluated on the
+        # geometry that will actually persist after scalar projection: a raw
+        # seed can become zero, covered, or an exact clone only at that
+        # boundary (notably in f32).
+        projected_requests: dict[tuple[str, int], list[Kernel]] = {}
+        for space, layer_index, seed in all_seed_requests:
+            projected = self._project_kernel(seed)
+            if _zero(projected.C):
+                continue
+            layer = self.layers[layer_index]
+            cells = layer.cells if space == "geometry" else layer.temporal_cells
+            atom = Kernel(1.0, projected.C, projected.V)
+            c2 = _norm2(projected.C)
+            if any(self._concern(cell, _norm2(cell.C), atom, c2)[0] for cell in cells):
+                continue
+            projected_requests.setdefault((space, layer_index), []).append(projected)
+
+        future_sigma: dict[tuple[str, int], list[Kernel]] = {}
+        net_new_geometry = 0
+        net_new_temporal = 0
+        geometric_seed_requests = 0
+        temporal_seed_requests = 0
+        for (space, layer_index), requests in projected_requests.items():
+            layer = self.layers[layer_index]
+            existing = layer.sigma if space == "geometry" else layer.temporal_sigma
+            future = self._coalesce_projected_kernels([*existing, *requests])
+            future_sigma[(space, layer_index)] = future
+            added = max(0, len(future) - len(existing))
+            if space == "geometry":
+                net_new_geometry += added
+                geometric_seed_requests += len(requests)
+            else:
+                net_new_temporal += added
+                temporal_seed_requests += len(requests)
+
+        growth_units = (
+            net_new_geometry * self.kernel_units
+            + net_new_temporal * self.temporal_kernel_units
+            + (self.layer_units if frontier_requested else 0)
+        )
+        transaction_requested = bool(future_sigma) or frontier_requested
+        if transaction_requested:
+            if self.maintenance_units() + growth_units <= self.budget_units:
+                for (space, layer_index), future in future_sigma.items():
+                    layer = self.layers[layer_index]
+                    if space == "geometry":
+                        layer.sigma = future
+                    else:
+                        layer.temporal_sigma = future
                 if frontier_requested:
                     self.layers.append(Layer([], []))
                 transformations.append({
                     "phase": "growth",
                     "type": "commit",
-                    "seeds": len(seeds),
+                    "geometric_seeds": geometric_seed_requests,
+                    "temporal_seeds": temporal_seed_requests,
+                    "seeds": geometric_seed_requests + temporal_seed_requests,
                     "layer_created": frontier_requested,
-                    "units": growth_cost,
+                    "units": growth_units,
                 })
             else:
                 transformations.append({
                     "phase": "growth",
                     "type": "reject",
-                    "seeds": len(seeds),
+                    "geometric_seeds": geometric_seed_requests,
+                    "temporal_seeds": temporal_seed_requests,
+                    "seeds": geometric_seed_requests + temporal_seed_requests,
                     "layer_requested": frontier_requested,
-                    "units": growth_cost,
+                    "units": growth_units,
                 })
 
         self.steps_seen += 1
@@ -917,23 +1292,45 @@ class Auxein:
         if maintenance_end > self.budget_units:
             raise RuntimeError("internal error: post-step state exceeds budget")
 
-        sorted_readout = sorted(readout, key=lambda item: (item[0], item[1], item[2]))
+        sorted_concepts = sorted(concept_readout, key=lambda item: (item[0], item[1], item[2]))
+        concepts = [
+            [universe, list(local_input), list(center)]
+            for universe, local_input, center in sorted_concepts
+        ]
+        if self.mode == "geometry":
+            readout: object = concepts
+        else:
+            sorted_sequences = sorted(
+                sequence_readout,
+                key=lambda item: (
+                    item[0], item[1][0], item[1][1], item[2][0], item[2][1]
+                ),
+            )
+            sequences = [
+                [
+                    universe,
+                    [list(inputs[0]), list(inputs[1])],
+                    [list(recognised[0]), list(recognised[1])],
+                ]
+                for universe, inputs, recognised in sorted_sequences
+            ]
+            readout = {"concepts": concepts, "sequences": sequences}
+
         return {
             "step_index": self.steps_seen - 1,
-            "readout": [
-                [universe, list(local_input), list(center)]
-                for universe, local_input, center in sorted_readout
-            ],
+            "readout": readout,
             "transformations": transformations,
             "maintenance_open_units": maintenance_open,
             "maintenance_units": maintenance_end,
             "budget_units": self.budget_units,
             "layer_reports": layer_reports,
+            "temporal_reports": temporal_reports,
         }
 
     # ----- derived views -------------------------------------------------
 
     def summary(self) -> dict[str, object]:
+        maintenance = self.maintenance_units()
         return {
             "steps_seen": self.steps_seen,
             "dimension": self.dimension,
@@ -941,18 +1338,31 @@ class Auxein:
             "scalar": self.scalar,
             "memory": self.memory,
             "eta": self.eta,
+            "mode": self.mode,
             "chi": self.chi,
             "alpha": self.alpha,
             "effective_alpha": self.beta,
             "layer_count": len(self.layers),
             "cells_per_layer": [len(layer.cells) for layer in self.layers],
             "sigma_per_layer": [len(layer.sigma) for layer in self.layers],
-            "maintenance_units": self.maintenance_units(),
+            "temporal_cells_per_layer": [
+                len(layer.temporal_cells) if self.mode == "temporal" else 0
+                for layer in self.layers
+            ],
+            "temporal_sigma_per_layer": [
+                len(layer.temporal_sigma) if self.mode == "temporal" else 0
+                for layer in self.layers
+            ],
+            "previous_context_per_layer": [
+                layer.previous is not None if self.mode == "temporal" else False
+                for layer in self.layers
+            ],
+            "maintenance_units": maintenance,
             "budget": str(self.budget),
             "budget_units": self.budget_units,
-            "budget_margin_units": self.budget_units - self.maintenance_units(),
-            "is_solvent": self.maintenance_units() <= self.budget_units,
+            "budget_margin_units": self.budget_units - maintenance,
+            "is_solvent": maintenance <= self.budget_units,
         }
 
 
-__all__ = ["Auxein", "Kernel", "Layer", "FORMAT_VERSION"]
+__all__ = ["Auxein", "Kernel", "Layer", "FORMAT_VERSION", "MODES"]

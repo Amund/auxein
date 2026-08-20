@@ -1,0 +1,98 @@
+{
+  "name": "temporal_oracle_decode",
+  "description": "External oracle labels a toy world only after Auxein runs: the engine must conceptualise A and B, learn A→B, generalise to unseen nearby probes, and reject B→A.",
+  "model": {
+    "dimension": 2,
+    "memory": 10,
+    "eta": 1,
+    "scalar": "f64",
+    "mode": "temporal",
+    "budget": 400
+  },
+  "oracle": {
+    "labels": {
+      "A": [1.0, 0.0],
+      "B": [0.0, 1.0]
+    },
+    "max_distance2": 0.05,
+    "final": {
+      "layer": 0,
+      "expected": {
+        "concept_cells": ["A", "B"],
+        "sequence_cells": [["A", "B"]]
+      }
+    }
+  },
+  "phases": [
+    {
+      "name": "learn-A-then-B",
+      "steps": 36,
+      "world": {
+        "name": "point-cycle",
+        "points": [[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]]
+      }
+    },
+    {
+      "name": "freeze-and-probe-forward",
+      "steps": 2,
+      "eta": 0,
+      "world": {
+        "name": "point-cycle",
+        "points": [[0.92, 0.08], [0.08, 0.92]]
+      },
+      "checks": [
+        {
+          "step": 0,
+          "expected": {
+            "concepts": [{"input": "A", "recognised": "A"}],
+            "sequences": []
+          }
+        },
+        {
+          "step": 1,
+          "expected": {
+            "concepts": [{"input": "B", "recognised": "B"}],
+            "sequences": [{"input": ["A", "B"], "recognised": ["A", "B"]}]
+          }
+        }
+      ]
+    },
+    {
+      "name": "clear-adjacency",
+      "steps": 1,
+      "eta": 0,
+      "world": {"name": "point-cycle", "points": [[0.0, 0.0]]},
+      "checks": [
+        {
+          "step": 0,
+          "expected": {"concepts": [], "sequences": []}
+        }
+      ]
+    },
+    {
+      "name": "probe-reverse",
+      "steps": 2,
+      "eta": 0,
+      "world": {
+        "name": "point-cycle",
+        "points": [[0.08, 0.92], [0.92, 0.08]]
+      },
+      "checks": [
+        {
+          "step": 0,
+          "expected": {
+            "concepts": [{"input": "B", "recognised": "B"}],
+            "sequences": []
+          }
+        },
+        {
+          "step": 1,
+          "expected": {
+            "concepts": [{"input": "A", "recognised": "A"}],
+            "sequences": []
+          }
+        }
+      ]
+    }
+  ]
+}

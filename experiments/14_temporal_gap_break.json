@@ -1,0 +1,10 @@
+{
+  "name": "temporal_gap_break",
+  "description": "A step with no recognised geometric context clears the previous-context register, so no transition can skip the gap.",
+  "model": {"dimension": 1, "memory": 10, "eta": 1, "scalar": "f64", "mode": "temporal", "budget": 400},
+  "phases": [
+    {"name": "learn", "steps": 32, "world": {"name": "point-cycle", "points": [[1.0],[5.0]]}},
+    {"name": "gap", "steps": 1, "eta": 0, "world": {"name": "point-cycle", "points": [[99.0]]}},
+    {"name": "resume", "steps": 1, "eta": 0, "world": {"name": "point-cycle", "points": [[5.0]]}}
+  ]
+}

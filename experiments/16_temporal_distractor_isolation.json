@@ -1,0 +1,103 @@
+{
+  "name": "temporal_distractor_isolation",
+  "description": "Unrelated concepts and a second learned sequence coexist without contaminating A→B recognition: A→B and C→D are learned independently; A→D and B→A remain silent.",
+  "model": {
+    "dimension": 2,
+    "memory": 10,
+    "eta": 1,
+    "scalar": "f64",
+    "mode": "temporal",
+    "budget": 400
+  },
+  "oracle": {
+    "labels": {
+      "A": [1.0, 0.0],
+      "B": [0.0, 1.0],
+      "C": [-1.0, 0.0],
+      "D": [0.0, -1.0]
+    },
+    "max_distance2": 0.05,
+    "final": {
+      "layer": 0,
+      "expected": {
+        "concept_cells": ["A", "B", "C", "D"],
+        "sequence_cells": [["A", "B"], ["C", "D"]]
+      }
+    }
+  },
+  "phases": [
+    {
+      "name": "learn-two-independent-sequences",
+      "steps": 240,
+      "world": {
+        "name": "point-cycle",
+        "points": [[1.0, 0.0], [0.0, 1.0], [0.0, 0.0], [-1.0, 0.0], [0.0, -1.0], [0.0, 0.0]]
+      }
+    },
+    {
+      "name": "clear-before-A-B",
+      "steps": 1,
+      "eta": 0,
+      "world": {"name": "point-cycle", "points": [[0.0, 0.0]]},
+      "checks": [{"step": 0, "expected": {"concepts": [], "sequences": []}}]
+    },
+    {
+      "name": "probe-A-B",
+      "steps": 2,
+      "eta": 0,
+      "world": {"name": "point-cycle", "points": [[0.92, 0.08], [0.08, 0.92]]},
+      "checks": [
+        {"step": 0, "expected": {"concepts": [{"input": "A", "recognised": "A"}], "sequences": []}},
+        {"step": 1, "expected": {"concepts": [{"input": "B", "recognised": "B"}], "sequences": [{"input": ["A", "B"], "recognised": ["A", "B"]}]}}
+      ]
+    },
+    {
+      "name": "clear-before-C-D",
+      "steps": 1,
+      "eta": 0,
+      "world": {"name": "point-cycle", "points": [[0.0, 0.0]]}
+    },
+    {
+      "name": "probe-C-D",
+      "steps": 2,
+      "eta": 0,
+      "world": {"name": "point-cycle", "points": [[-0.92, -0.08], [-0.08, -0.92]]},
+      "checks": [
+        {"step": 0, "expected": {"concepts": [{"input": "C", "recognised": "C"}], "sequences": []}},
+        {"step": 1, "expected": {"concepts": [{"input": "D", "recognised": "D"}], "sequences": [{"input": ["C", "D"], "recognised": ["C", "D"]}]}}
+      ]
+    },
+    {
+      "name": "clear-before-cross",
+      "steps": 1,
+      "eta": 0,
+      "world": {"name": "point-cycle", "points": [[0.0, 0.0]]}
+    },
+    {
+      "name": "probe-cross-A-D",
+      "steps": 2,
+      "eta": 0,
+      "world": {"name": "point-cycle", "points": [[0.92, 0.08], [-0.08, -0.92]]},
+      "checks": [
+        {"step": 0, "expected": {"concepts": [{"input": "A", "recognised": "A"}], "sequences": []}},
+        {"step": 1, "expected": {"concepts": [{"input": "D", "recognised": "D"}], "sequences": []}}
+      ]
+    },
+    {
+      "name": "clear-before-reverse",
+      "steps": 1,
+      "eta": 0,
+      "world": {"name": "point-cycle", "points": [[0.0, 0.0]]}
+    },
+    {
+      "name": "probe-reverse-B-A",
+      "steps": 2,
+      "eta": 0,
+      "world": {"name": "point-cycle", "points": [[0.08, 0.92], [0.92, 0.08]]},
+      "checks": [
+        {"step": 0, "expected": {"concepts": [{"input": "B", "recognised": "B"}], "sequences": []}},
+        {"step": 1, "expected": {"concepts": [{"input": "A", "recognised": "A"}], "sequences": []}}
+      ]
+    }
+  ]
+}
