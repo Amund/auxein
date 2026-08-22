@@ -1,18 +1,19 @@
-"""Auxein v0.4.0 reference implementation.
+"""Auxein v0.5.0 reference implementation.
 
 This module implements ``spec/auxein.md`` using only the Python standard
-library.  Geometry mode is the canonical centered-kernel recursion. Temporal mode keeps that geometry unchanged and adds, for each layer, an independent
-``E⊕E`` population learning only adjacent ``step-1 -> step`` context pairs.
-Predictive mode keeps both unchanged and adds a read-only projection of existing
-temporal CELLs from recognised present context to candidate ``step+1`` contexts.
+library. Geometry mode learns and emits centered geometric knowledge. Predictive
+mode keeps that geometry unchanged and adds a private ``E⊕E`` succession
+population used only to emit candidate future geometric presentations.
 
 Persistent cognitive state remains deliberately small:
 
     NETWORK -> ordered LAYERs
                  |- geometric {CELL, Sigma}
-                 `- temporal  {CELL, Sigma, previous context}  [temporal/predictive]
+                 `- predictive-private {CELL^T, Sigma^T, previous context}
 
-Contexts, responsibilities, current presentations and readouts are ephemeral.
+Recognised presentations, contexts, responsibilities and readouts are ephemeral.
+Sequence boundaries are explicit: ``step(P)`` is an atomic sequence, while
+``sequence([...])`` processes a non-atomic causal sequence.
 """
 
 from __future__ import annotations
@@ -21,18 +22,17 @@ from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation, ROUND_FLOOR
 import math
 import struct
+import sys
 from numbers import Real
 from typing import Iterable, Mapping, Sequence
 
 
-FORMAT_VERSION = 4
+FORMAT_VERSION = 5
 SCALARS = {"f32": 4, "f64": 8}
-MODES = {"geometry", "temporal", "predictive"}
+MODES = {"geometry", "predictive"}
 
 Vector = tuple[float, ...]
-Recognition = tuple[str, Vector, Vector]
-TemporalRecognition = tuple[str, tuple[Vector, Vector], tuple[Vector, Vector]]
-Prediction = tuple[str, Vector, Vector, Vector]
+PredictionTarget = Vector
 
 
 # ---------------------------------------------------------------------------
@@ -64,7 +64,7 @@ def _eta(value: object) -> float:
 
 def _mode(value: object) -> str:
     if not isinstance(value, str) or value not in MODES:
-        raise ValueError("mode must be 'geometry', 'temporal' or 'predictive'")
+        raise ValueError("mode must be 'geometry' or 'predictive'")
     return value
 
 
@@ -319,7 +319,7 @@ class _PopulationResult:
     cells: list[Kernel]
     sigma: list[Kernel]
     context: Kernel | None
-    readout: set[tuple[Vector, Vector]]
+    knowledge: list[Kernel]
     seed_requests: list[Kernel]
     transformations: list[dict[str, object]]
     report: dict[str, object]
@@ -329,7 +329,7 @@ class _PopulationResult:
 class _LayerResult:
     output: list[Kernel]
     context: Kernel | None
-    readout: set[Recognition]
+    present: list[Kernel] | None
     seed_requests: list[Kernel]
     transformations: list[dict[str, object]]
     report: dict[str, object]
@@ -340,7 +340,7 @@ class _LayerResult:
 
 
 class Auxein:
-    """Reference Auxein v0.4.0 network."""
+    """Reference Auxein v0.5.0 network."""
 
     def __init__(
         self,
@@ -350,7 +350,6 @@ class Auxein:
         eta: float = 1.0,
         scalar: str = "f64",
         mode: str = "geometry",
-        universe: str = "auxein",
         budget: object | None = None,
         budget_units: int | None = None,
     ) -> None:
@@ -362,10 +361,8 @@ class Auxein:
         self.memory = self._project.real(_positive(memory, "memory"))
         self.eta = self._project.real(_eta(eta))
         self.mode = _mode(mode)
-        if not isinstance(universe, str) or not universe:
-            raise ValueError("universe must be a nonempty string")
-        self.universe = universe
         self.steps_seen = 0
+        self._sequence_open = False
         self.layers: list[Layer] = [Layer([], [])]
         self._refresh_clock()
         self._set_initial_budget(budget=budget, budget_units=budget_units)
@@ -494,7 +491,6 @@ class Auxein:
         *,
         budget: object | None = None,
         budget_units: int | None = None,
-        universe: str = "auxein",
     ) -> "Auxein":
         if not isinstance(state, Mapping):
             raise TypeError("state must be a mapping")
@@ -518,7 +514,6 @@ class Auxein:
             eta=_eta(state["eta"]),
             scalar=str(state["scalar"]),
             mode=mode,
-            universe=universe,
             budget=budget,
             budget_units=budget_units,
         )
@@ -788,35 +783,56 @@ class Auxein:
     # ----- presentation parsing ----------------------------------------
 
     def _presentation(self, value: object) -> list[Kernel]:
-        """Build L0's uniform point-kernel presentation.
-
-        The public NETWORK boundary accepts only a finite nonempty sequence
-        of vectors.  Internal masses and variances are a LAYER-to-LAYER
-        concern and are never accepted from the caller.
-        """
+        """Parse the canonical weighted boundary or vector-list sugar."""
         if (
             not isinstance(value, Sequence)
             or isinstance(value, (str, bytes, bytearray))
             or len(value) == 0
         ):
-            raise ValueError("external presentation must be a nonempty sequence of vectors")
-        vectors = [
-            _vector(item, self.dimension, f"presentation[{i}]")
-            for i, item in enumerate(value)
-        ]
-        # Canonically coalesce geometry before projecting uniform masses.
-        # For k artificial copies of the whole presentation, count/n is the
-        # same real number as (k*count)/(k*n), whereas summing k rounded
-        # copies of 1/(k*n) can differ by an ulp and leak multiplicity into
-        # higher-layer readouts.
-        counts: dict[Vector, int] = {}
-        for vector in vectors:
-            counts[vector] = counts.get(vector, 0) + 1
-        total = len(vectors)
-        return [
-            Kernel(count / total, vector, 0.0)
-            for vector, count in sorted(counts.items())
-        ]
+            raise ValueError("presentation must be a nonempty sequence")
+
+        # Sugar: a finite nonempty list of vectors is the uniform point-kernel
+        # presentation. Exact duplicate vectors are coalesced canonically.
+        if all(_is_vector(item, self.dimension) for item in value):
+            vectors = [
+                _vector(item, self.dimension, f"presentation[{i}]")
+                for i, item in enumerate(value)
+            ]
+            counts: dict[Vector, int] = {}
+            for vector in vectors:
+                counts[vector] = counts.get(vector, 0) + 1
+            total = len(vectors)
+            return [
+                Kernel(count / total, vector, 0.0)
+                for vector, count in sorted(counts.items())
+            ]
+
+        kernels: list[Kernel] = []
+        for i, item in enumerate(value):
+            if isinstance(item, Kernel):
+                W = _positive(item.W, f"presentation[{i}].W")
+                C = _vector(item.C, self.dimension, f"presentation[{i}].C")
+                V = _finite(item.V, f"presentation[{i}].V")
+            elif (
+                isinstance(item, Sequence)
+                and not isinstance(item, (str, bytes, bytearray))
+                and len(item) == 3
+            ):
+                W = _positive(item[0], f"presentation[{i}][0]")
+                C = _vector(item[1], self.dimension, f"presentation[{i}][1]")
+                V = _finite(item[2], f"presentation[{i}][2]")
+            else:
+                raise ValueError(
+                    "presentation items must be all vectors or weighted [W, C, V] kernels"
+                )
+            if V < 0.0:
+                raise ValueError(f"presentation[{i}] variance must be nonnegative")
+            kernels.append(Kernel(W, C, V))
+
+        total = math.fsum(kernel.W for kernel in kernels)
+        if not 0.0 < total <= 1.0:
+            raise ValueError("presentation mass must lie in (0, 1]")
+        return self._coalesce_kernels(kernels)
 
     @staticmethod
     def _coalesce_kernels(kernels: Iterable[Kernel]) -> list[Kernel]:
@@ -831,6 +847,30 @@ class Auxein:
             base = representative[key]
             out.append(Kernel(math.fsum(groups[key]), base.C, base.V))
         return out
+
+    def _complete_presentation(self, kernels: Iterable[Kernel]) -> list[Kernel]:
+        """Coalesce a cognitive presentation and complete its mass to one."""
+        coalesced = self._coalesce_kernels(kernels)
+        total = math.fsum(kernel.W for kernel in coalesced)
+        remainder = math.fsum((1.0, -total))
+        if remainder < 0.0:
+            if abs(remainder) <= 8.0 * math.ulp(1.0):
+                remainder = 0.0
+            else:
+                raise RuntimeError("internal error: presentation mass exceeds one")
+        if remainder > 0.0:
+            coalesced = self._coalesce_kernels(
+                [*coalesced, Kernel(remainder, (0.0,) * self.dimension, 0.0)]
+            )
+        return coalesced
+
+    @staticmethod
+    def _readout_presentation(presentation: Sequence[Kernel]) -> list[list[object]]:
+        return [[kernel.W, list(kernel.C), kernel.V] for kernel in presentation]
+
+    @staticmethod
+    def _presentation_key(presentation: Sequence[Kernel]) -> tuple[tuple[float, Vector, float], ...]:
+        return tuple((kernel.W, kernel.C, kernel.V) for kernel in presentation)
 
     def _coalesce_projected_kernels(self, kernels: Iterable[Kernel]) -> list[Kernel]:
         """Coalesce kernels whose C/V are already persistent values.
@@ -910,9 +950,10 @@ class Auxein:
         cell_targets = [_KernelAccumulator() for _ in cells_start]
         cell_received = [0.0] * len(cells_start)
         context = _KernelAccumulator() if collect_context else None
-        readout: set[tuple[Vector, Vector]] = set()
+        knowledge_weights: dict[Vector, list[float]] = {}
         unknown: list[tuple[Kernel, float]] = []
         recognised_atoms = 0
+        recognition_count = 0
 
         # CONCERN -> ALLOCATE -> RECOGNISE from the frozen CELL state.
         for atom in presentation:
@@ -940,16 +981,46 @@ class Auxein:
                 rho = atom.W * score / denominator
                 cell_targets[ci].add(atom.C, atom.V, rho)
                 cell_received[ci] += rho
-                readout.add((atom.C, cells_start[ci].kernel.C))
+
+            recognised_by_center: dict[Vector, float] = {}
+            for ci, gain in concerned:
+                recognised_by_center.setdefault(cells_start[ci].kernel.C, gain)
+            recognition_count += len(recognised_by_center)
 
             if context is not None:
                 # R_s is the exact quotient of recognised snapshot values.
-                recognised_values = sorted({cells_start[ci].kernel.C for ci, _ in concerned})
-                share = atom.W / len(recognised_values)
-                for center in recognised_values:
-                    context.add(center, 0.0, share)
+                # Knowledge mass is partitioned only by CONCERN gain; support
+                # and ALLOCATE responsibilities have no authority here.
+                items = sorted(recognised_by_center.items())
+                if len(items) == 1:
+                    weighted = [(items[0][0], atom.W)]
+                else:
+                    gain_scale = max(gain for _, gain in items)
+                    scaled = [(center, gain / gain_scale) for center, gain in items]
+                    denominator = math.fsum(gain for _, gain in scaled)
+                    weighted: list[tuple[Vector, float]] = []
+                    assigned: list[float] = []
+                    for center, gain in scaled[:-1]:
+                        omega = atom.W * gain / denominator
+                        assigned.append(omega)
+                        weighted.append((center, omega))
+                    last_center, _ = scaled[-1]
+                    last_weight = atom.W - math.fsum(assigned)
+                    if last_weight <= 0.0:
+                        # Extreme rounding fallback: the ratio form remains
+                        # authoritative and all gains are strictly positive.
+                        last_weight = atom.W * scaled[-1][1] / denominator
+                    weighted.append((last_center, last_weight))
+                for center, omega in weighted:
+                    context.add(center, 0.0, omega)
+                    knowledge_weights.setdefault(center, []).append(omega)
 
         context_kernel = None if context is None else context.get()
+        knowledge = [
+            Kernel(math.fsum(weights), center, 0.0)
+            for center, weights in sorted(knowledge_weights.items())
+            if math.fsum(weights) > 0.0
+        ]
 
         # CELL update exactly once per preexisting cell.
         updated_cells: list[Kernel] = []
@@ -1077,11 +1148,12 @@ class Auxein:
                 "sigma_count_after": len(sigma),
                 "promoted": len(promoted),
                 "seed_requests": len(admissible_seeds),
-                "recognition_count": len(readout),
+                "recognition_count": recognition_count,
+                "knowledge_mass": math.fsum(kernel.W for kernel in knowledge),
                 "cell_responsibility_mass": list(cell_received),
             }
         return _PopulationResult(
-            cells, sigma, context_kernel, readout, admissible_seeds, transformations, report
+            cells, sigma, context_kernel, knowledge, admissible_seeds, transformations, report
         )
 
     def _process_layer(
@@ -1106,23 +1178,22 @@ class Auxein:
             and not _zero(context_kernel.C)
         )
         output = [context_kernel] if context_emitted and context_kernel is not None else []
-        readout: set[Recognition] = {
-            (self.universe, local_input, recognised)
-            for local_input, recognised in result.readout
-        }
+        present = None if not result.knowledge else self._complete_presentation(result.knowledge)
         report = result.report
         if detailed:
             report.update({
                 "context_emitted": context_emitted,
                 "output_atom_count": len(output),
-                "output_mass": 0.0 if not output else output[0].W,
+                "output_mass": 0.0 if context_kernel is None else context_kernel.W,
                 "context_center": None if context_kernel is None else list(context_kernel.C),
                 "context_variance": None if context_kernel is None else context_kernel.V,
+                "present_atom_count": 0 if present is None else len(present),
+                "present_mass": 0.0 if present is None else math.fsum(k.W for k in present),
             })
         return _LayerResult(
             output,
             context_kernel,
-            readout,
+            present,
             result.seed_requests,
             result.transformations,
             report,
@@ -1156,70 +1227,175 @@ class Auxein:
         return center[: self.dimension], center[self.dimension :]
 
     @staticmethod
-    def _point_concern(a: Vector, b: Vector) -> bool:
-        """Canonical point/point CONCERN with symmetric extreme scaling."""
-        a2 = _norm2(a)
+    def _point_relative_gain_with_norm(
+        a: Vector, a2: float, b: Vector
+    ) -> float | None:
+        """Point/point CONCERN gain with a precomputed current squared norm."""
         b2 = _norm2(b)
-        a_extreme = (not math.isfinite(a2)) or (a2 == 0.0 and not _zero(a))
-        b_extreme = (not math.isfinite(b2)) or (b2 == 0.0 and not _zero(b))
+        a_extreme = (not math.isfinite(a2)) or (0.0 < a2 < sys.float_info.min) or (
+            a2 == 0.0 and not _zero(a)
+        )
+        b_extreme = (not math.isfinite(b2)) or (0.0 < b2 < sys.float_info.min) or (
+            b2 == 0.0 and not _zero(b)
+        )
         if a_extreme or b_extreme:
             scale = max(
                 max((abs(x) for x in a), default=0.0),
                 max((abs(x) for x in b), default=0.0),
             )
             if scale == 0.0:
-                return False
+                return None
             aa = tuple(x / scale for x in a)
             bb = tuple(x / scale for x in b)
+            a2 = _norm2(aa)
+            b2 = _norm2(bb)
             d2 = _dist2(aa, bb)
-            return d2 < _norm2(aa) and d2 < _norm2(bb)
-        d2 = _dist2(a, b)
-        return d2 < a2 and d2 < b2
+        else:
+            d2 = _dist2(a, b)
+        if not (d2 < a2 and d2 < b2):
+            return None
+        return (a2 - d2) / a2
+
+    @staticmethod
+    def _point_relative_gain(a: Vector, b: Vector) -> float | None:
+        """Point/point CONCERN and its relative gain, with extreme scaling."""
+        return Auxein._point_relative_gain_with_norm(a, _norm2(a), b)
+
+    @staticmethod
+    def _point_concern(a: Vector, b: Vector) -> bool:
+        """Canonical point/point CONCERN."""
+        return Auxein._point_relative_gain(a, b) is not None
 
     def _predict_temporal(
         self, layer: Layer, context: Kernel
-    ) -> set[Prediction]:
-        """Read existing temporal knowledge from present to next context.
-
-        Prediction is deliberately a projection of temporal CELL centers only.
-        The temporal quotient retains no separate source/target variance, so no
-        projected kernel radius can be reconstructed canonically.  Both the
-        present context center and each temporal source projection are therefore
-        compared as point kernels by the ordinary CONCERN predicate.
-        """
+    ) -> dict[PredictionTarget, float]:
+        """Project frozen temporal CELLs to target -> maximal relative gain."""
         current = context.C
-        out: set[Prediction] = set()
+        current2 = _norm2(current)
+        out: dict[PredictionTarget, float] = {}
         for cell in layer.temporal_cells:
             source, target = self._split_temporal(cell.C)
-            if self._point_concern(current, source):
-                out.add((self.universe, current, source, target))
+            gamma = self._point_relative_gain_with_norm(current, current2, source)
+            if gamma is not None:
+                previous = out.get(target)
+                if previous is None or gamma > previous:
+                    out[target] = gamma
         return out
 
-    # ----- public step ---------------------------------------------------
+    # ----- public presentation / sequence API ---------------------------
+
+    def begin_sequence(self, *, resume: bool = False) -> None:
+        """Open an explicit causal sequence.
+
+        By default all previous-context registers are cleared. ``resume=True``
+        is the explicit opt-in required to continue causal registers restored
+        from a mid-sequence persistent state.
+        """
+        if self._sequence_open:
+            raise RuntimeError("a sequence is already open")
+        if not resume:
+            self._invalidate_previous()
+        self._sequence_open = True
+
+    def end_sequence(self) -> None:
+        """Close the current causal sequence and destroy causal continuity."""
+        if not self._sequence_open:
+            raise RuntimeError("no sequence is open")
+        self._invalidate_previous()
+        self._sequence_open = False
+
+    def sequence_step(
+        self, presentation: object, *, detailed_report: bool = False
+    ) -> dict[str, object]:
+        """Process one presentation inside an explicitly open sequence."""
+        if not self._sequence_open:
+            raise RuntimeError("sequence_step requires begin_sequence()")
+        return self._step_in_sequence(presentation, detailed_report=detailed_report)
 
     def step(self, presentation: object, *, detailed_report: bool = False) -> dict[str, object]:
+        """Process one atomic sequence.
+
+        Successive calls to ``step`` never create temporal continuity. Use
+        ``sequence`` or the explicit begin/sequence_step/end API for a real
+        causal sequence.
+        """
+        if self._sequence_open:
+            raise RuntimeError("step cannot be used while a sequence is open")
+        self.begin_sequence()
+        try:
+            return self._step_in_sequence(presentation, detailed_report=detailed_report)
+        finally:
+            self.end_sequence()
+
+    def sequence(
+        self, presentations: object, *, detailed_report: bool = False
+    ) -> list[dict[str, object]]:
+        """Process a finite nonempty explicit causal sequence."""
+        if self._sequence_open:
+            raise RuntimeError("sequence cannot be nested")
+        if (
+            not isinstance(presentations, Sequence)
+            or isinstance(presentations, (str, bytes, bytearray))
+            or len(presentations) == 0
+        ):
+            raise ValueError("sequence must be a nonempty sequence of presentations")
+        self.begin_sequence()
+        try:
+            return [
+                self._step_in_sequence(presentation, detailed_report=detailed_report)
+                for presentation in presentations
+            ]
+        finally:
+            self.end_sequence()
+
+    def consume(
+        self, present_family: object, *, detailed_report: bool = False
+    ) -> list[dict[str, object]]:
+        """Consume an upstream present family as depth-ordered atomic sequences.
+
+        This is the canonical direct NETWORK→NETWORK composition helper. An
+        empty family still destroys any residual causal register.
+        """
+        if self._sequence_open:
+            raise RuntimeError("consume cannot be used while a sequence is open")
+        if (
+            not isinstance(present_family, Sequence)
+            or isinstance(present_family, (str, bytes, bytearray))
+        ):
+            raise ValueError("present_family must be a sequence of presentations")
+        self._invalidate_previous()
+        reports: list[dict[str, object]] = []
+        for presentation in present_family:
+            reports.append(self.step(presentation, detailed_report=detailed_report))
+        self._invalidate_previous()
+        return reports
+
+    def _step_in_sequence(
+        self, presentation: object, *, detailed_report: bool = False
+    ) -> dict[str, object]:
         current = self._presentation(presentation)
         transformations: list[dict[str, object]] = []
         self._force_solvency(transformations)
         maintenance_open = self.maintenance_units()
         layer_count_start = len(self.layers)
-        concept_readout: set[Recognition] = set()
-        sequence_readout: set[TemporalRecognition] = set()
-        prediction_readout: set[Prediction] = set()
+        present_family: list[list[Kernel]] = []
+        future_by_key: dict[tuple[tuple[float, Vector, float], ...], list[Kernel]] = {}
         all_seed_requests: list[tuple[str, int, Kernel]] = []
         layer_reports: list[dict[str, object]] = []
         temporal_reports: list[dict[str, object]] = []
         contexts: list[Kernel | None] = [None] * layer_count_start
         frontier_requested = False
 
-        # Complete geometric recursion first. The temporal phase can observe
-        # these contexts but can never feed back into geometry in the same step.
+        # Complete geometric recursion first. Predictive-private temporal
+        # cognition can observe these contexts but never feeds back into the
+        # geometry of the same presentation.
         for layer_index in range(layer_count_start):
             if not current:
                 break
             result = self._process_layer(layer_index, current, detailed=detailed_report)
             contexts[layer_index] = result.context
-            concept_readout.update(result.readout)
+            if result.present is not None:
+                present_family.append(result.present)
             transformations.extend(result.transformations)
             all_seed_requests.extend(
                 ("geometry", layer_index, seed) for seed in result.seed_requests
@@ -1230,17 +1406,20 @@ class Auxein:
                 frontier_requested = True
             current = result.output
 
-        if self.mode != "geometry":
+        if self.mode == "predictive":
             for layer_index in range(layer_count_start):
                 layer = self.layers[layer_index]
                 previous = layer.previous
                 context = contexts[layer_index]
 
-                # Predict from the frozen temporal knowledge that existed before
-                # this layer's temporal learning phase. A knowledge created or
-                # promoted during the current step has authority only next step.
-                if self.mode == "predictive" and context is not None:
-                    prediction_readout.update(self._predict_temporal(layer, context))
+                # Prediction reads only the temporal snapshot that existed
+                # before this presentation's temporal learning phase.
+                if context is not None:
+                    for target, gamma in self._predict_temporal(layer, context).items():
+                        candidate = self._complete_presentation(
+                            [Kernel(context.W * gamma, target, 0.0)]
+                        )
+                        future_by_key.setdefault(self._presentation_key(candidate), candidate)
 
                 if previous is not None and context is not None:
                     temporal_presentation = [self._temporal_atom(previous, context)]
@@ -1251,25 +1430,15 @@ class Auxein:
                     all_seed_requests.extend(
                         ("temporal", layer_index, seed) for seed in result.seed_requests
                     )
-                    for local_input, recognised in result.readout:
-                        sequence_readout.add((
-                            self.universe,
-                            self._split_temporal(local_input),
-                            self._split_temporal(recognised),
-                        ))
                     if detailed_report:
                         temporal_reports.append(result.report)
 
-                # P_k is causal state, not learned memory: it advances even at eta=0.
-                layer.previous = (
-                    None if context is None else self._project_kernel(context)
-                )
+                # P_k is causal state, not learned memory: it advances even at
+                # eta=0, but only inside the explicit sequence boundary.
+                layer.previous = None if context is None else self._project_kernel(context)
 
-        # One material growth transaction spans geometric and temporal seeds
-        # plus the optional frontier layer.  Admission is evaluated on the
-        # geometry that will actually persist after scalar projection: a raw
-        # seed can become zero, covered, or an exact clone only at that
-        # boundary (notably in f32).
+        # One material growth transaction spans geometric and predictive-private
+        # temporal seeds plus the optional frontier layer.
         projected_requests: dict[tuple[str, int], list[Kernel]] = {}
         for space, layer_index, seed in all_seed_requests:
             projected = self._project_kernel(seed)
@@ -1342,50 +1511,14 @@ class Auxein:
         if maintenance_end > self.budget_units:
             raise RuntimeError("internal error: post-step state exceeds budget")
 
-        sorted_concepts = sorted(concept_readout, key=lambda item: (item[0], item[1], item[2]))
-        concepts = [
-            [universe, list(local_input), list(center)]
-            for universe, local_input, center in sorted_concepts
-        ]
-        if self.mode == "geometry":
-            readout: object = concepts
-        else:
-            sorted_sequences = sorted(
-                sequence_readout,
-                key=lambda item: (
-                    item[0], item[1][0], item[1][1], item[2][0], item[2][1]
-                ),
-            )
-            sequences = [
-                [
-                    universe,
-                    [list(inputs[0]), list(inputs[1])],
-                    [list(recognised[0]), list(recognised[1])],
-                ]
-                for universe, inputs, recognised in sorted_sequences
+        readout: dict[str, object] = {
+            "present": [self._readout_presentation(item) for item in present_family]
+        }
+        if self.mode == "predictive":
+            readout["future"] = [
+                self._readout_presentation(future_by_key[key])
+                for key in sorted(future_by_key)
             ]
-            if self.mode == "temporal":
-                readout = {"concepts": concepts, "sequences": sequences}
-            else:
-                sorted_predictions = sorted(
-                    prediction_readout,
-                    key=lambda item: (item[0], item[1], item[2], item[3]),
-                )
-                predictions = [
-                    [
-                        universe,
-                        list(current_context),
-                        list(recognised_source),
-                        list(predicted_successor),
-                    ]
-                    for universe, current_context, recognised_source, predicted_successor
-                    in sorted_predictions
-                ]
-                readout = {
-                    "concepts": concepts,
-                    "sequences": sequences,
-                    "predictions": predictions,
-                }
 
         return {
             "step_index": self.steps_seen - 1,
@@ -1405,7 +1538,6 @@ class Auxein:
         return {
             "steps_seen": self.steps_seen,
             "dimension": self.dimension,
-            "universe": self.universe,
             "scalar": self.scalar,
             "memory": self.memory,
             "eta": self.eta,

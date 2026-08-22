@@ -1,8 +1,0 @@
-{
-  "name": "growth_budget_gate",
-  "description": "Simultaneous material growth is rejected as one transaction when the budget cannot pay all seeds/frontier requests.",
-  "model": {"dimension": 1, "memory": 10, "eta": 1, "scalar": "f64", "budget": 1},
-  "phases": [
-    {"name": "two-unknowns", "steps": 4, "world": {"name": "presentation-cycle", "presentations": [[[-2.0],[2.0]]]}}
-  ]
-}

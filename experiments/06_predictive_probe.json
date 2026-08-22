@@ -1,0 +1,10 @@
+{
+  "name": "predictive_probe",
+  "description": "Train geometry atomically, train a causal A/B sequence, freeze, then probe A atomically for future candidates.",
+  "model": {"dimension": 1, "memory": 10, "eta": 1, "mode": "predictive", "budget": 700},
+  "phases": [
+    {"name": "geometry", "steps": 20, "world": {"name": "point-cycle", "points": [[1.0], [10.0]]}},
+    {"name": "sequence", "steps": 40, "causal": true, "world": {"name": "point-cycle", "points": [[1.0], [10.0]]}},
+    {"name": "probe", "steps": 3, "eta": 0, "world": {"name": "point-cycle", "points": [[1.0]]}}
+  ]
+}

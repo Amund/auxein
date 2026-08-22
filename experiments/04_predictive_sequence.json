@@ -1,0 +1,9 @@
+{
+  "name": "predictive_sequence",
+  "description": "A non-atomic explicit sequence can create private temporal knowledge.",
+  "model": {"dimension": 1, "memory": 10, "eta": 1, "mode": "predictive", "budget": 700},
+  "phases": [
+    {"name": "learn-geometry", "steps": 20, "world": {"name": "point-cycle", "points": [[1.0], [10.0]]}},
+    {"name": "learn-sequence", "steps": 40, "causal": true, "world": {"name": "point-cycle", "points": [[1.0], [10.0]]}}
+  ]
+}

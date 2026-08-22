@@ -1,9 +1,0 @@
-{
-  "name": "budget_contraction",
-  "description": "A later budget cut clears private work and then destroys lowest-value knowledge only when materially required.",
-  "model": {"dimension": 1, "memory": 10, "eta": 1, "scalar": "f64", "budget": 30},
-  "phases": [
-    {"name": "grow", "steps": 60, "world": {"name": "point-cycle", "points": [[-4.0],[-2.0],[1.0],[3.0],[5.0]]}},
-    {"name": "contract", "steps": 1, "budget": 0, "world": {"name": "point-cycle", "points": [[0.0]]}}
-  ]
-}

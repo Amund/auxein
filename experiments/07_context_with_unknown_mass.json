@@ -1,9 +1,0 @@
-{
-  "name": "context_with_unknown_mass",
-  "description": "Recognised mass forms the vertical context while an unrelated atom stays local to Sigma in the same presentation.",
-  "model": {"dimension": 1, "memory": 10, "eta": 1, "scalar": "f64", "budget": 300},
-  "phases": [
-    {"name": "learn-local", "steps": 12, "world": {"name": "point-cycle", "points": [[1.0],[3.0]]}},
-    {"name": "mixed", "steps": 8, "world": {"name": "presentation-cycle", "presentations": [[[1.0],[3.0],[10.0]]]}}
-  ]
-}

@@ -1,0 +1,8 @@
+{
+  "name": "atomic_isolation",
+  "description": "The same observations as atomic sequences create no cross-call temporal continuity.",
+  "model": {"dimension": 1, "memory": 10, "eta": 1, "mode": "predictive", "budget": 700},
+  "phases": [
+    {"name": "atomic", "steps": 40, "world": {"name": "point-cycle", "points": [[1.0], [10.0]]}}
+  ]
+}

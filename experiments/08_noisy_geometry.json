@@ -1,0 +1,9 @@
+{
+  "name": "noisy_geometry",
+  "description": "Noisy recurrent points exercise centered-kernel EMA and material growth.",
+  "seed": 7,
+  "model": {"dimension": 2, "memory": 20, "eta": 1, "mode": "geometry", "budget": 800},
+  "phases": [
+    {"name": "noise", "steps": 200, "world": {"name": "gaussian-mixture", "centers": [[1.0, 0.0], [0.0, 1.0]], "std": 0.03}}
+  ]
+}

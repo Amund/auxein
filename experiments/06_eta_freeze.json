@@ -1,9 +1,0 @@
-{
-  "name": "eta_freeze",
-  "description": "eta=0 freezes cognition and growth while recognition and contextual emission remain observable.",
-  "model": {"dimension": 1, "memory": 10, "eta": 1, "scalar": "f64", "budget": 200},
-  "phases": [
-    {"name": "learn-local", "steps": 12, "world": {"name": "point-cycle", "points": [[1.0],[3.0]]}},
-    {"name": "freeze", "steps": 8, "eta": 0, "world": {"name": "presentation-cycle", "presentations": [[[1.0],[3.0]]]}}
-  ]
-}

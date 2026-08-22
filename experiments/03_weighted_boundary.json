@@ -1,0 +1,9 @@
+{
+  "name": "weighted_boundary",
+  "description": "Canonical weighted kernel presentations coexist with vector-list sugar.",
+  "model": {"dimension": 1, "memory": 10, "eta": 1, "mode": "geometry", "budget": 300},
+  "phases": [
+    {"name": "learn", "steps": 8, "world": {"name": "point-cycle", "points": [[2.0]]}},
+    {"name": "partial", "steps": 4, "eta": 0, "world": {"name": "weighted-presentation-cycle", "presentations": [[[0.25, [2.0], 0.0], [0.75, [99.0], 0.0]]]}}
+  ]
+}

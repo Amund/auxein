@@ -1,0 +1,8 @@
+{
+  "name": "vertical_context",
+  "description": "Two recurrent geometric values create a higher contextual layer.",
+  "model": {"dimension": 1, "memory": 10, "eta": 1, "mode": "geometry", "budget": 500},
+  "phases": [
+    {"name": "pair", "steps": 30, "world": {"name": "presentation-cycle", "presentations": [[[1.0], [3.0]]]}}
+  ]
+}

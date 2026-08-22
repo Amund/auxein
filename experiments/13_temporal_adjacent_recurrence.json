@@ -1,8 +1,0 @@
-{
-  "name": "temporal_adjacent_recurrence",
-  "description": "In temporal mode, repeated adjacent singleton contexts create temporal knowledge while geometry remains the substrate.",
-  "model": {"dimension": 1, "memory": 10, "eta": 1, "scalar": "f64", "mode": "temporal", "budget": 400},
-  "phases": [
-    {"name": "alternate", "steps": 48, "world": {"name": "point-cycle", "points": [[1.0],[5.0]]}}
-  ]
-}

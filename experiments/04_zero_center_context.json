@@ -1,9 +1,0 @@
-{
-  "name": "zero_center_context",
-  "description": "A perfectly symmetric recognised context has nonzero dispersion but zero center and therefore remains vertically silent.",
-  "model": {"dimension": 1, "memory": 10, "eta": 1, "scalar": "f64", "budget": 200},
-  "phases": [
-    {"name": "learn-local", "steps": 12, "world": {"name": "point-cycle", "points": [[-1.0],[1.0]]}},
-    {"name": "symmetric-context", "steps": 12, "world": {"name": "presentation-cycle", "presentations": [[[-1.0],[1.0]]]}}
-  ]
-}

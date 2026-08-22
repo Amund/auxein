@@ -1,9 +1,0 @@
-{
-  "name": "f32_context",
-  "description": "The contextual recursion remains available under f32 persistent projection.",
-  "model": {"dimension": 1, "memory": 10.1, "eta": 0.7, "scalar": "f32", "budget": 200},
-  "phases": [
-    {"name": "learn-local", "steps": 20, "world": {"name": "point-cycle", "points": [[1.0],[3.0]]}},
-    {"name": "context", "steps": 20, "world": {"name": "presentation-cycle", "presentations": [[[1.0],[3.0]]]}}
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "name": "pair_context",
-  "description": "Two locally learned values, when recognised in one logical presentation, create one recurrent context at L1 and no echo tower.",
-  "model": {"dimension": 1, "memory": 10, "eta": 1, "scalar": "f64", "budget": 200},
-  "phases": [
-    {"name": "learn-local", "steps": 12, "world": {"name": "point-cycle", "points": [[1.0],[3.0]]}},
-    {"name": "learn-context", "steps": 12, "world": {"name": "presentation-cycle", "presentations": [[[1.0],[3.0]]]}}
-  ]
-}

@@ -1,8 +1,8 @@
 {
   "name": "horizontal_recurrence",
-  "description": "A repeated unknown singleton becomes one local CELL and never creates vertical depth by itself.",
-  "model": {"dimension": 1, "memory": 10, "eta": 1, "scalar": "f64", "budget": 100},
+  "description": "Repeated geometry promotes recurrent unknowns without temporal continuity.",
+  "model": {"dimension": 1, "memory": 10, "eta": 1, "mode": "geometry", "budget": 200},
   "phases": [
-    {"name": "repeat", "steps": 8, "world": {"name": "point-cycle", "points": [[2.0]]}}
+    {"name": "repeat", "steps": 12, "world": {"name": "point-cycle", "points": [[2.0]]}}
   ]
 }

@@ -1,0 +1,9 @@
+{
+  "name": "gap_break",
+  "description": "A presentation without recognised context breaks private temporal adjacency inside a sequence.",
+  "model": {"dimension": 1, "memory": 10, "eta": 1, "mode": "predictive", "budget": 700},
+  "phases": [
+    {"name": "geometry", "steps": 20, "world": {"name": "point-cycle", "points": [[1.0], [10.0]]}},
+    {"name": "with-gap", "steps": 30, "causal": true, "world": {"name": "point-cycle", "points": [[1.0], [0.0], [10.0]]}}
+  ]
+}
